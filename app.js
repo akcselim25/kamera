@@ -245,7 +245,7 @@ async function startCameraMode() {
     // Kamerayı aç
     let stream;
     try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: 640 }, audio: false });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
         video.srcObject = stream;
         video.muted = true;
     } catch (err) {
