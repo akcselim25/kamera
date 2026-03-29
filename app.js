@@ -76,12 +76,26 @@ window.unlockTarget = function() {
     }
 }
 
+// Gelişmiş hedef takibi için IoU hesaplama (Kutu Kesişimi)
+function getIoU(box1, box2) {
+    const [x1, y1, w1, h1] = box1;
+    const [x2, y2, w2, h2] = box2;
+    const xA = Math.max(x1, x2);
+    const yA = Math.max(y1, y2);
+    const xB = Math.min(x1 + w1, x2 + w2);
+    const yB = Math.min(y1 + h1, y2 + h2);
+    const interArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
+    if (interArea === 0) return 0;
+    return interArea / ((w1 * h1) + (w2 * h2) - interArea);
+}
+
 /** 2. YAPAY ZEKA MODELLERİ */
 async function loadModel() {
     aiStatus.innerText = "Yapay Zeka Yükleniyor...";
     try { await tf.ready(); } catch(e) {}
     
-    model = await cocoSsd.load();
+    // Daha tutarlı ve gelişmiş doğruluk için mobilenet_v2 bazlı modeli kullanıyoruz
+    model = await cocoSsd.load({base: 'mobilenet_v2'});
     aiStatus.innerText = "Sistem Hazır - İzleyici Bekleniyor...";
     
     video.addEventListener('loadedmetadata', () => {
@@ -107,26 +121,46 @@ async function detectFrame() {
 
         const predictions = await model.detect(video);
         
-        // SADECE İNSANLARI FİLTRELE
-        currentPeople = predictions.filter(p => p.class === 'person' && p.score > 0.40);
+        // SADECE İNSANLARI FİLTRELE (Tam kare alabilmesi için eşiği optimize ettik)
+        currentPeople = predictions.filter(p => p.class === 'person' && p.score > 0.35);
 
         let targetFound = false;
 
         if (lockedTarget) {
             let bestMatch = null;
-            let minDistance = 250; 
+            let bestScore = -Infinity; 
 
             currentPeople.forEach(person => {
                 const [x, y, w, h] = person.bbox;
+                const iou = getIoU(lockedTarget.bbox, person.bbox);
+                
                 const centerX = x + w/2;
                 const centerY = y + h/2;
-                
                 const dist = Math.hypot(centerX - lockedTarget.x, centerY - lockedTarget.y);
-                if (dist < minDistance) {
-                    minDistance = dist;
+                
+                const prevW = lockedTarget.bbox[2];
+                const prevH = lockedTarget.bbox[3];
+                const maxDim = Math.max(prevW, prevH) || 1;
+                
+                // Hedef takibini sapmamak üzere IoU (kesişim), mesafe ve boyut oranları ile çok daha hassaslaştırdık
+                const distRatio = dist / maxDim;
+                const currentArea = w * h;
+                const prevArea = prevW * prevH;
+                const sizeRatio = Math.min(currentArea, prevArea) / Math.max(currentArea, prevArea); 
+                
+                let score = (iou * 2.5) + sizeRatio - (distRatio * 1.5);
+                
+                // Çok alakasız (farklı boyutta ya da çok uzak) birine atlamaması için sıkı kontrol:
+                if ((iou > 0.05 || (distRatio < 1.5 && sizeRatio > 0.4)) && score > bestScore) {
+                    bestScore = score;
                     bestMatch = person;
                 }
             });
+
+            // Aşırı düşük güvenli bir eşleşme ise yanlış kişiye atlama
+            if (bestScore < -1.0) {
+                bestMatch = null;
+            }
 
             if (bestMatch) {
                 targetFound = true;
