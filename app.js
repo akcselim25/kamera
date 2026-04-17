@@ -315,27 +315,15 @@ cvs.addEventListener('click', (e) => {
 
     if (!modelReady || people.length === 0) return;
 
-    // En yakın kişiyi bul (tıklanan noktaya)
-    let best = null, bestDist = Infinity;
+    // SADECE kutunun İÇİNE tıklanırsa seç (boşluğa tıklanırsa hiçbir şey yapma)
     for (const p of people) {
         const [x, y, w, h] = p.bbox;
-        // Kutunun içine tıklandıysa direkt seç
         if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) {
-            best = p;
-            break;
-        }
-        // Değilse en yakını bul
-        const pcx = x + w / 2, pcy = y + h / 2;
-        const d = Math.hypot(cx - pcx, cy - pcy);
-        if (d < bestDist) {
-            bestDist = d;
-            best = p;
+            lockToPerson(p.bbox);
+            return;
         }
     }
-
-    if (best) {
-        lockToPerson(best.bbox);
-    }
+    // Kutu dışına tıklandı → hiçbir şey yapma
 });
 
 ub.addEventListener('click', () => {
@@ -412,15 +400,14 @@ document.getElementById('btnCam').addEventListener('click', async () => {
             else if (d.type === 'viewer_click') {
                 const cx = (d.x / d.w) * cvs.width;
                 const cy = (d.y / d.h) * cvs.height;
-                // En yakın kişiyi bul
-                let best = null, bd = Infinity;
+                // SADECE kutunun İÇİNE tıklanırsa seç
                 for (const p of people) {
                     const [x, y, w, h] = p.bbox;
-                    if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) { best = p; break; }
-                    const dist = Math.hypot(cx - (x + w / 2), cy - (y + h / 2));
-                    if (dist < bd) { bd = dist; best = p; }
+                    if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) {
+                        lockToPerson(p.bbox);
+                        break;
+                    }
                 }
-                if (best) lockToPerson(best.bbox);
             }
             else if (d.type === 'viewer_unlock') unlockTarget();
         });
