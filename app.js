@@ -1,490 +1,466 @@
 // ===================================================================
-// MOBİL AI İZLEME - MediaPipe WASM Sürümü (TensorFlow.js'den 5-10x hızlı)
+// KAMERA TAKİP - Piksel Tabanlı Gerçek Zamanlı İzleme
 // ===================================================================
-// MediaPipe, Google'ın mobil cihazlar için özel geliştirdiği AI motoru.
-// WASM + WebGL kullanır, TensorFlow.js'nin JS overhead'i yoktur.
-// Telefonda gerçek zamanlı (~15-25 FPS) insan tespiti yapabilir.
+// ML modeli YOK. AI YOK. Model indirme YOK.
+// Kullanıcı kişiye dokunur → piksel deseni kaydedilir → her karede aranır.
+// Sonuç: Anında açılır, 30+ FPS, telefon kasmaz.
 // ===================================================================
 
+// =================== DOM ===================
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const alertBox = document.getElementById('alert');
+const connStatus = document.getElementById('conn-status');
+const aiStatus = document.getElementById('ai-status');
+const pulse = document.getElementById('conn-pulse');
+const unlockBtn = document.getElementById('unlockBtn');
+
+// =================== BAĞLANTI ===================
 let peer = null;
 let conn = null;
 let call = null;
 let isCamera = false;
 
-const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const alertBox = document.getElementById('alert');
-
-const connStatus = document.getElementById('conn-status');
-const aiStatus = document.getElementById('ai-status');
-const pulse = document.getElementById('conn-pulse');
-
-// AI Değişkenleri
-let detector = null; // MediaPipe ObjectDetector
-let lastPersonTime = Date.now();
-const ALERT_TIMEOUT = 1500;
+// =================== TAKİP DEĞİŞKENLERİ ===================
+let trackingActive = false;
+let templateGray = null;      // Float32Array - gri tonlama şablon
+let templateW = 0;            // Küçültülmüş şablon genişlik
+let templateH = 0;            // Küçültülmüş şablon yükseklik
+let targetRect = null;        // {x, y, w, h} - orijinal video koordinatları
+let trackConfidence = 0;
+let lastSeenTime = Date.now();
+const LOST_TIMEOUT = 1500;    // 1.5 saniye görünmezse alarm
 let isAlerting = false;
 let vibrateInterval;
 
-let currentPeople = [];
-let lockedTarget = null;
-let isDetecting = false;
-let lastDetectTime = 0;
+// Takip sabitleri
+const TPL_W_RATIO = 0.13;     // Şablon genişliği = video genişliğinin %13'ü
+const TPL_H_RATIO = 0.22;     // Şablon yüksekliği = video yüksekliğinin %22'si
+const SCALE = 0.20;           // Piksel işleme için küçültme oranı (5x küçült)
+const SEARCH_PAD = 1.8;       // Arama penceresi = şablon boyutunun 1.8 katı pad
+const MATCH_OK = 0.30;        // Bu skorun üstü = hedef bulundu
+const MATCH_UPDATE = 0.55;    // Bu skorun üstü = şablonu güncelle
+const TPL_BLEND = 0.12;       // Şablon güncelleme karışım oranı
 
-// Filtreleme
-const MIN_BBOX_RATIO = 0.012; // Ekranın %1.2'sinden küçük kutuları reddet
+// Geçici canvas'lar (görünmez, piksel okuma için)
+const tmpCanvas = document.createElement('canvas');
+const tmpCtx = tmpCanvas.getContext('2d', { willReadFrequently: true });
 
-function isValidPersonShape(w, h) {
-    const ratio = h / w;
-    return ratio > 0.7 && ratio < 6.0;
-}
+// =================== YARDIMCI FONKSİYONLAR ===================
 
 function generateCode() {
     return Math.floor(10000 + Math.random() * 90000).toString();
 }
 
-// =================== TIKKLAMA OLAYLARI ===================
-canvas.addEventListener('click', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    
-    const clickX = (clientX - rect.left) * scaleX;
-    const clickY = (clientY - rect.top) * scaleY;
-
-    if (!isCamera) {
-        if (conn && conn.open) {
-            conn.send({ type: 'viewer_click', x: clickX, y: clickY, w: canvas.width, h: canvas.height });
-        }
-        return;
+// RGB piksellerini gri tonlamaya çevir
+function rgbaToGray(data, w, h) {
+    const gray = new Float32Array(w * h);
+    for (let i = 0; i < w * h; i++) {
+        const idx = i * 4;
+        gray[i] = data[idx] * 0.299 + data[idx + 1] * 0.587 + data[idx + 2] * 0.114;
     }
+    return gray;
+}
 
-    if (!currentPeople || currentPeople.length === 0) return;
-
-    for (let person of currentPeople) {
-        const [x, y, w, h] = person.bbox;
-        if (clickX >= x && clickX <= x + w && clickY >= y && clickY <= y + h) {
-            lockOnPerson(person);
-            break;
+// Normalized Cross-Correlation (NCC) - şablon eşleştirme
+// Yüksek skor = iyi eşleşme (1.0 = mükemmel)
+function ncc(tpl, search, ox, oy, tw, th, sw) {
+    let sumT = 0, sumS = 0, sumTT = 0, sumSS = 0, sumTS = 0;
+    const n = tw * th;
+    for (let y = 0; y < th; y++) {
+        const tRow = y * tw;
+        const sRow = (oy + y) * sw + ox;
+        for (let x = 0; x < tw; x++) {
+            const t = tpl[tRow + x];
+            const s = search[sRow + x];
+            sumT += t;
+            sumS += s;
+            sumTS += t * s;
+            sumTT += t * t;
+            sumSS += s * s;
         }
     }
-});
+    const mT = sumT / n;
+    const mS = sumS / n;
+    const num = sumTS - n * mT * mS;
+    const denA = sumTT - n * mT * mT;
+    const denB = sumSS - n * mS * mS;
+    if (denA <= 0 || denB <= 0) return 0;
+    return num / Math.sqrt(denA * denB);
+}
 
-function lockOnPerson(person) {
-    const [x, y, w, h] = person.bbox;
-    lockedTarget = { x: x + w/2, y: y + h/2, bbox: person.bbox };
-    document.getElementById('unlockBtn').style.display = 'block';
-    
-    aiStatus.innerText = "🎯 HEDEFE KİLİTLENİLDİ!";
+// =================== TAKİP MOTORU ===================
+
+function startTracking(centerX, centerY) {
+    // Orijinal boyutlarda şablon boyutunu hesapla
+    const origW = Math.round(video.videoWidth * TPL_W_RATIO);
+    const origH = Math.round(video.videoHeight * TPL_H_RATIO);
+    const x = Math.max(0, Math.round(centerX - origW / 2));
+    const y = Math.max(0, Math.round(centerY - origH / 2));
+    const w = Math.min(origW, video.videoWidth - x);
+    const h = Math.min(origH, video.videoHeight - y);
+
+    // Küçültülmüş boyutlar
+    const sw = Math.max(4, Math.round(w * SCALE));
+    const sh = Math.max(4, Math.round(h * SCALE));
+
+    // Şablonu küçültüp yakala
+    tmpCanvas.width = sw;
+    tmpCanvas.height = sh;
+    tmpCtx.drawImage(video, x, y, w, h, 0, 0, sw, sh);
+    const imgData = tmpCtx.getImageData(0, 0, sw, sh);
+
+    templateGray = rgbaToGray(imgData.data, sw, sh);
+    templateW = sw;
+    templateH = sh;
+    targetRect = { x, y, w, h };
+    trackingActive = true;
+    trackConfidence = 1.0;
+    lastSeenTime = Date.now();
+
+    unlockBtn.style.display = 'block';
+    aiStatus.innerText = "🎯 HEDEFE KİLİTLENDİ!";
     aiStatus.style.color = "#4CAF50";
-    lastPersonTime = Date.now();
+
+    // İzleyiciye bildir
+    if (conn && conn.open) conn.send({ type: 'person_in' });
 }
 
-window.unlockTarget = function() {
-    lockedTarget = null;
-    document.getElementById('unlockBtn').style.display = 'none';
-    
-    if (!isCamera) {
-        if (conn && conn.open) conn.send({ type: 'viewer_unlock' });
-        aiStatus.innerText = "Kilit Açıldı - Kişiye Dokunun";
-        aiStatus.style.color = "#00bcd4";
+function doTrack() {
+    if (!targetRect || !templateGray) return false;
+
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+
+    // Arama alanı: hedefin etrafında geniş bir pencere
+    const padX = Math.round(targetRect.w * SEARCH_PAD);
+    const padY = Math.round(targetRect.h * SEARCH_PAD);
+    const sx = Math.max(0, targetRect.x - padX);
+    const sy = Math.max(0, targetRect.y - padY);
+    const ex = Math.min(vw, targetRect.x + targetRect.w + padX);
+    const ey = Math.min(vh, targetRect.y + targetRect.h + padY);
+    const searchW = ex - sx;
+    const searchH = ey - sy;
+
+    // Küçültülmüş arama alanı
+    const ssw = Math.max(templateW + 2, Math.round(searchW * SCALE));
+    const ssh = Math.max(templateH + 2, Math.round(searchH * SCALE));
+
+    tmpCanvas.width = ssw;
+    tmpCanvas.height = ssh;
+    tmpCtx.drawImage(video, sx, sy, searchW, searchH, 0, 0, ssw, ssh);
+    const searchImg = tmpCtx.getImageData(0, 0, ssw, ssh);
+    const searchGray = rgbaToGray(searchImg.data, ssw, ssh);
+
+    // Kaba arama (step=2)
+    let bestScore = -1;
+    let bestDX = 0, bestDY = 0;
+    const maxDY = ssh - templateH;
+    const maxDX = ssw - templateW;
+
+    for (let dy = 0; dy <= maxDY; dy += 2) {
+        for (let dx = 0; dx <= maxDX; dx += 2) {
+            const score = ncc(templateGray, searchGray, dx, dy, templateW, templateH, ssw);
+            if (score > bestScore) {
+                bestScore = score;
+                bestDX = dx;
+                bestDY = dy;
+            }
+        }
+    }
+
+    // İnce arama (en iyi noktanın ±2 piksel çevresinde)
+    const fineStartX = Math.max(0, bestDX - 2);
+    const fineEndX = Math.min(maxDX, bestDX + 2);
+    const fineStartY = Math.max(0, bestDY - 2);
+    const fineEndY = Math.min(maxDY, bestDY + 2);
+
+    for (let dy = fineStartY; dy <= fineEndY; dy++) {
+        for (let dx = fineStartX; dx <= fineEndX; dx++) {
+            const score = ncc(templateGray, searchGray, dx, dy, templateW, templateH, ssw);
+            if (score > bestScore) {
+                bestScore = score;
+                bestDX = dx;
+                bestDY = dy;
+            }
+        }
+    }
+
+    trackConfidence = bestScore;
+
+    if (bestScore >= MATCH_OK) {
+        // Hedef bulundu! Pozisyonu güncelle
+        targetRect.x = sx + Math.round(bestDX / SCALE);
+        targetRect.y = sy + Math.round(bestDY / SCALE);
+
+        // Yüksek güvenle şablonu yavaşça güncelle (ışık değişimine uyum)
+        if (bestScore >= MATCH_UPDATE) {
+            tmpCanvas.width = templateW;
+            tmpCanvas.height = templateH;
+            tmpCtx.drawImage(video, targetRect.x, targetRect.y, targetRect.w, targetRect.h, 0, 0, templateW, templateH);
+            const newData = tmpCtx.getImageData(0, 0, templateW, templateH);
+            const newGray = rgbaToGray(newData.data, templateW, templateH);
+            // Eski + yeni karışımı (drift'i önler)
+            for (let i = 0; i < templateGray.length; i++) {
+                templateGray[i] = templateGray[i] * (1 - TPL_BLEND) + newGray[i] * TPL_BLEND;
+            }
+        }
+
+        lastSeenTime = Date.now();
+        return true;
+    }
+
+    return false;
+}
+
+// =================== ANA DÖNGÜ ===================
+
+function mainLoop() {
+    if (video.readyState < 4) {
+        requestAnimationFrame(mainLoop);
         return;
     }
 
-    aiStatus.innerText = "Sistem Hazır - Kişiye Dokunun";
-    aiStatus.style.color = "#00bcd4";
-    
-    if(conn && conn.open) {
-        conn.send({ type: 'person_in' });
-    }
-}
-
-// IoU hesaplama
-function getIoU(box1, box2) {
-    const [x1, y1, w1, h1] = box1;
-    const [x2, y2, w2, h2] = box2;
-    const xA = Math.max(x1, x2);
-    const yA = Math.max(y1, y2);
-    const xB = Math.min(x1 + w1, x2 + w2);
-    const yB = Math.min(y1 + h1, y2 + h2);
-    const interArea = Math.max(0, xB - xA) * Math.max(0, yB - yA);
-    if (interArea === 0) return 0;
-    return interArea / ((w1 * h1) + (w2 * h2) - interArea);
-}
-
-// =================== MEDIAPIPE AI MOTORU ===================
-async function loadModel() {
-    const loadingContainer = document.getElementById('loading-container');
-    const loadingFill = document.getElementById('loading-fill');
-    const loadingText = document.getElementById('loading-text');
-    
-    if (loadingContainer) loadingContainer.style.display = 'block';
-    
-    aiStatus.innerText = "AI Motoru Yükleniyor...";
-    if (loadingFill) loadingFill.style.width = '10%';
-    if (loadingText) loadingText.innerText = 'MediaPipe WASM yükleniyor...';
-    
-    try {
-        // MediaPipe Vision modülünü dinamik olarak yükle (sadece ihtiyaç duyulduğunda)
-        if (loadingFill) loadingFill.style.width = '25%';
-        const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
-        
-        if (loadingFill) loadingFill.style.width = '50%';
-        if (loadingText) loadingText.innerText = 'GPU hazırlanıyor...';
-        
-        // WASM dosyalarını yükle (GPU hızlandırma)
-        const filesetResolver = await vision.FilesetResolver.forVisionTasks(
-            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-        );
-        
-        if (loadingFill) loadingFill.style.width = '75%';
-        if (loadingText) loadingText.innerText = 'AI modeli indiriliyor...';
-        
-        // EfficientDet-Lite0: Mobil için optimize, çok hızlı
-        detector = await vision.ObjectDetector.createFromOptions(filesetResolver, {
-            baseOptions: {
-                modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
-                delegate: 'GPU' // WebGL GPU hızlandırma
-            },
-            categoryAllowlist: ['person'], // SADECE insan algıla (diğer nesneleri yoksay)
-            scoreThreshold: 0.40,
-            maxResults: 10,
-            runningMode: 'VIDEO' // Video modu: kareler arası optimizasyon yapar
-        });
-        
-        if (loadingFill) loadingFill.style.width = '100%';
-        if (loadingText) loadingText.innerText = 'Hazır!';
-        
-        aiStatus.innerText = "Sistem Hazır - İzleyici Bekleniyor...";
-        
-        setTimeout(() => {
-            if (loadingContainer) loadingContainer.style.display = 'none';
-        }, 500);
-
-    } catch(err) {
-        console.error('MediaPipe yükleme hatası:', err);
-        aiStatus.innerText = "AI Yüklenemedi! GPU desteklenmiyor olabilir.";
-        aiStatus.style.color = "#f44336";
-        if (loadingText) loadingText.innerText = 'Hata: ' + err.message;
-        
-        // GPU başarısız olursa CPU ile dene
-        try {
-            if (loadingText) loadingText.innerText = 'CPU modu deneniyor...';
-            const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
-            const filesetResolver = await vision.FilesetResolver.forVisionTasks(
-                'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-            );
-            detector = await vision.ObjectDetector.createFromOptions(filesetResolver, {
-                baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
-                    delegate: 'CPU'
-                },
-                categoryAllowlist: ['person'],
-                scoreThreshold: 0.40,
-                maxResults: 10,
-                runningMode: 'VIDEO'
-            });
-            aiStatus.innerText = "Sistem Hazır (CPU modu)";
-            aiStatus.style.color = "#FF9800";
-            if (loadingContainer) loadingContainer.style.display = 'none';
-        } catch(err2) {
-            console.error('CPU fallback hatası:', err2);
-            return;
-        }
-    }
-    
-    video.addEventListener('loadedmetadata', () => {
+    if (canvas.width !== video.videoWidth && video.videoWidth > 0) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-    });
-    
-    detectFrame();
-}
+    }
 
-// =================== ALGILAMA DÖNGÜSÜ ===================
-async function detectFrame() {
-    if (!isCamera || !detector) return;
-    
-    const now = performance.now();
-    
-    if (video.readyState === 4 && !isDetecting) {
-        isDetecting = true;
-        
-        if (canvas.width !== video.videoWidth && video.videoWidth > 0) {
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-        }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (isCamera && trackingActive) {
+        const found = doTrack();
 
-        // MediaPipe detectForVideo: WASM ile süper hızlı!
-        // Dahili olarak resmi optimize boyuta küçültür, offscreen canvas'a gerek yok
-        const result = detector.detectForVideo(video, now);
-        
-        const videoArea = video.videoWidth * video.videoHeight;
-        
-        // Sonuçları filtrele ve bbox formatına çevir
-        currentPeople = result.detections
-            .filter(d => {
-                const bb = d.boundingBox;
-                // Çok küçük kutuları reddet
-                if ((bb.width * bb.height) < (videoArea * MIN_BBOX_RATIO)) return false;
-                // İnsan şekline uymayan kutuları reddet
-                if (!isValidPersonShape(bb.width, bb.height)) return false;
-                return true;
-            })
-            .map(d => ({
-                bbox: [d.boundingBox.originX, d.boundingBox.originY, d.boundingBox.width, d.boundingBox.height],
-                score: d.categories[0].score
-            }));
+        if (found && targetRect) {
+            // YEŞİL KİLİT ÇERÇEVESİ
+            ctx.strokeStyle = '#00FF00';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(targetRect.x, targetRect.y, targetRect.w, targetRect.h);
 
-        let targetFound = false;
+            ctx.fillStyle = '#00FF00';
+            ctx.font = 'bold 20px Arial';
+            const label = `🎯 %${Math.round(trackConfidence * 100)}`;
+            ctx.fillText(label, targetRect.x, targetRect.y > 25 ? targetRect.y - 8 : 25);
 
-        if (lockedTarget) {
-            let bestMatch = null;
-            let bestScore = -Infinity; 
+            // Merkez noktası
+            ctx.beginPath();
+            ctx.arc(targetRect.x + targetRect.w / 2, targetRect.y + targetRect.h / 2, 5, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(0, 255, 0, 0.7)';
+            ctx.fill();
 
-            currentPeople.forEach(person => {
-                const [x, y, w, h] = person.bbox;
-                const iou = getIoU(lockedTarget.bbox, person.bbox);
-                
-                const centerX = x + w/2;
-                const centerY = y + h/2;
-                const dist = Math.hypot(centerX - lockedTarget.x, centerY - lockedTarget.y);
-                
-                const prevW = lockedTarget.bbox[2];
-                const prevH = lockedTarget.bbox[3];
-                const maxDim = Math.max(prevW, prevH) || 1;
-                
-                const distRatio = dist / maxDim;
-                const currentArea = w * h;
-                const prevArea = prevW * prevH;
-                const sizeRatio = Math.min(currentArea, prevArea) / Math.max(currentArea, prevArea); 
-                
-                let score = (iou * 4.0) + (sizeRatio * 1.5) - (distRatio * 3.5);
-                
-                if ((iou > 0.1 || (distRatio < 1.0 && sizeRatio > 0.5)) && score > bestScore) {
-                    bestScore = score;
-                    bestMatch = person;
-                }
-            });
-
-            if (bestScore < 0.3) {
-                bestMatch = null;
+            if (aiStatus.innerText.indexOf('✅') === -1) {
+                aiStatus.innerText = '✅ Hedef Görüş Alanında';
+                aiStatus.style.color = '#4CAF50';
+                if (conn && conn.open) conn.send({ type: 'person_in' });
             }
-
-            if (bestMatch) {
-                targetFound = true;
-                const [x, y, w, h] = bestMatch.bbox;
-                lockedTarget = { x: x + w/2, y: y + h/2, bbox: bestMatch.bbox };
-                
-                ctx.strokeStyle = '#00FF00'; 
-                ctx.fillStyle = '#00FF00';
-                ctx.lineWidth = 4;
-                ctx.strokeRect(x, y, w, h);
-                
-                ctx.font = 'bold 22px Arial';
-                ctx.fillText(`🎯 KİLİTLİ HEDEF`, x, y > 25 ? y - 10 : 25);
-            }
-
-            currentPeople.forEach(person => {
-                if (person !== bestMatch) {
-                    const [px, py, pw, ph] = person.bbox;
-                    ctx.strokeStyle = 'rgba(255, 0, 0, 0.4)'; 
-                    ctx.lineWidth = 2;
-                    ctx.strokeRect(px, py, pw, ph);
-                }
-            });
-
         } else {
-            currentPeople.forEach(person => {
-                const [x, y, w, h] = person.bbox;
-                ctx.strokeStyle = '#00bcd4'; 
-                ctx.fillStyle = '#00bcd4';
-                ctx.lineWidth = 3;
-                ctx.strokeRect(x, y, w, h);
-                
-                ctx.font = '18px Arial';
-                ctx.fillText(`👆 Dokun`, x, y > 20 ? y - 10 : 20);
-                
-                ctx.beginPath();
-                ctx.arc(x + w/2, y + h/2, 8, 0, 2 * Math.PI);
-                ctx.fillStyle = 'rgba(0, 188, 212, 0.6)';
-                ctx.fill();
-            });
-            
-            targetFound = true; 
-        }
-
-        // ALARM MANTIĞI
-        if (lockedTarget) {
-            if (targetFound) {
-                lastPersonTime = Date.now();
-                if (aiStatus.innerText.indexOf('✅') === -1) {
-                    aiStatus.innerText = `✅ Hedef Görüş Alanında`;
-                    aiStatus.style.color = "#4CAF50";
-                    if(conn && conn.open) conn.send({ type: 'person_in' }); 
+            // Hedef kaybedildi
+            const elapsed = Date.now() - lastSeenTime;
+            if (elapsed >= LOST_TIMEOUT) {
+                if (aiStatus.innerText !== '❌ HEDEF KAYIP!') {
+                    aiStatus.innerText = '❌ HEDEF KAYIP!';
+                    aiStatus.style.color = '#f44336';
+                    if (conn && conn.open) conn.send({ type: 'person_out' });
                 }
             } else {
-                const timeSinceLastPerson = Date.now() - lastPersonTime;
-                if (timeSinceLastPerson >= ALERT_TIMEOUT) {
-                    if (aiStatus.innerText !== `❌ HEDEF KAYIP!`) {
-                        aiStatus.innerText = `❌ HEDEF KAYIP!`;
-                        aiStatus.style.color = "#f44336";
-                        if(conn && conn.open) conn.send({ type: 'person_out' }); 
-                    }
+                // Kısa süre kayıp, henüz alarm verme
+                if (targetRect) {
+                    ctx.strokeStyle = '#FF9800';
+                    ctx.lineWidth = 3;
+                    ctx.setLineDash([8, 8]);
+                    ctx.strokeRect(targetRect.x, targetRect.y, targetRect.w, targetRect.h);
+                    ctx.setLineDash([]);
+                    ctx.fillStyle = '#FF9800';
+                    ctx.font = 'bold 18px Arial';
+                    ctx.fillText('⚠ Aranıyor...', targetRect.x, targetRect.y > 25 ? targetRect.y - 8 : 25);
                 }
             }
         }
-        
-        // İzleyiciye tracking verisini gönder
-        if (conn && conn.open) {
+
+        // İzleyiciye takip verisini gönder
+        if (conn && conn.open && targetRect) {
             conn.send({
                 type: 'tracking_data',
                 w: canvas.width,
                 h: canvas.height,
-                people: currentPeople.map(p => p.bbox),
-                lockedTarget: lockedTarget ? lockedTarget.bbox : null,
-                targetFound: targetFound
+                rect: [targetRect.x, targetRect.y, targetRect.w, targetRect.h],
+                confidence: trackConfidence,
+                found: trackConfidence >= MATCH_OK
             });
         }
-        
-        isDetecting = false;
+    } else if (isCamera && !trackingActive) {
+        // Hedef seçilmemiş - rehber göster
+        ctx.fillStyle = 'rgba(0, 188, 212, 0.8)';
+        ctx.font = 'bold 24px Arial';
+        const text = '👆 Kişiye dokunun';
+        const tm = ctx.measureText(text);
+        ctx.fillText(text, (canvas.width - tm.width) / 2, canvas.height / 2);
     }
-    
-    // MediaPipe çok hızlı olduğu için minimal bekleme yeterli
-    // requestAnimationFrame zaten 60fps'e kilitli, AI ~15-25fps çalışacak
-    requestAnimationFrame(detectFrame);
+
+    // ~25fps hedefli döngü (pil ve performans dengesi)
+    setTimeout(() => requestAnimationFrame(mainLoop), 40);
 }
 
+// =================== TIKKLAMA ===================
+
+canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const cx = (e.clientX - rect.left) * scaleX;
+    const cy = (e.clientY - rect.top) * scaleY;
+
+    if (!isCamera) {
+        // İzleyici: tıklamayı kameraya gönder
+        if (conn && conn.open) {
+            conn.send({ type: 'viewer_click', x: cx, y: cy, w: canvas.width, h: canvas.height });
+        }
+        return;
+    }
+
+    // Kamera: tıklanan noktada takibi başlat
+    if (video.readyState >= 4) {
+        startTracking(cx, cy);
+    }
+});
+
+unlockBtn.addEventListener('click', () => {
+    if (!isCamera) {
+        if (conn && conn.open) conn.send({ type: 'viewer_unlock' });
+        trackingActive = false;
+        targetRect = null;
+        unlockBtn.style.display = 'none';
+        aiStatus.innerText = 'Kilit Açıldı';
+        aiStatus.style.color = '#00bcd4';
+        clearAlertDisplay();
+        return;
+    }
+
+    trackingActive = false;
+    targetRect = null;
+    templateGray = null;
+    unlockBtn.style.display = 'none';
+    aiStatus.innerText = 'Kişiye dokunun';
+    aiStatus.style.color = '#00bcd4';
+    clearAlertDisplay();
+    if (conn && conn.open) conn.send({ type: 'person_in' });
+});
+
 // =================== KAMERA MODU ===================
-async function startCameraMode() {
+
+document.getElementById('btnCam').addEventListener('click', async () => {
     isCamera = true;
     document.getElementById('role-selection').style.display = 'none';
     document.getElementById('main').style.display = 'flex';
     document.getElementById('cam-controls').style.display = 'block';
-    
+    document.getElementById('lock-controls').style.display = 'block';
+
     let stream;
     try {
-        // 720p: Uzaktakileri görecek kadar net, hızlı çalışacak kadar hafif
-        stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { 
-                facingMode: "environment", 
-                width: { ideal: 1280 }, 
-                height: { ideal: 720 } 
-            }, 
-            audio: false 
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
         });
         video.srcObject = stream;
         video.muted = true;
     } catch (err) {
-        alert("Kamera Açılamadı veya İzin Verilmedi!");
+        alert('Kamera açılamadı!');
         location.reload();
         return;
     }
 
     const shortCode = generateCode();
-    const peerId = `phtrck-${shortCode}`;
+    const peerId = 'phtrck-' + shortCode;
     document.getElementById('my-code').innerText = shortCode;
 
-    connStatus.innerText = "Sunucuya Kayıt Olunuyor...";
+    connStatus.innerText = 'Kayıt olunuyor...';
     pulse.className = 'pulse';
 
     peer = new Peer(peerId, { debug: 0 });
-    
-    peer.on('open', (id) => {
-        connStatus.innerText = "Yayınla... İzleyici Bekleniyor!";
+
+    peer.on('open', () => {
+        connStatus.innerText = 'Hazır — İzleyici bekleniyor';
         pulse.className = 'pulse green';
-        document.getElementById('lock-controls').style.display = 'block';
-        loadModel(); // MediaPipe modelini yükle
+        aiStatus.innerText = 'Kişiye dokunun';
+        mainLoop();
     });
 
     peer.on('connection', (connection) => {
         conn = connection;
-        connStatus.innerText = "İzleyici Bağlandı! (Aktif)";
-        
+        connStatus.innerText = 'İzleyici bağlandı!';
+
         conn.on('data', (data) => {
-            if(data.type === 'viewer_ready') {
+            if (data.type === 'viewer_ready') {
                 peer.call(conn.peer, stream);
             } else if (data.type === 'viewer_click') {
-                const clickX = (data.x / data.w) * canvas.width;
-                const clickY = (data.y / data.h) * canvas.height;
-                
-                for (let person of currentPeople) {
-                    const [px, py, pw, ph] = person.bbox;
-                    if (clickX >= px && clickX <= px + pw && clickY >= py && clickY <= py + ph) {
-                        lockOnPerson(person);
-                        break;
-                    }
-                }
+                const cx = (data.x / data.w) * canvas.width;
+                const cy = (data.y / data.h) * canvas.height;
+                if (video.readyState >= 4) startTracking(cx, cy);
             } else if (data.type === 'viewer_unlock') {
-                window.unlockTarget();
+                unlockBtn.click();
             }
         });
-        
+
         conn.on('close', () => {
-            connStatus.innerText = "İzleyici Ayrıldı!";
+            connStatus.innerText = 'İzleyici ayrıldı';
         });
     });
-}
+
+    peer.on('error', (err) => console.error('Peer error:', err));
+});
 
 // =================== İZLEYİCİ MODU ===================
-function showViewerInput() {
+
+document.getElementById('btnView').addEventListener('click', () => {
     document.getElementById('role-selection').style.display = 'none';
     document.getElementById('viewer-setup').style.display = 'flex';
-}
+});
 
-function connectToCamera() {
+document.getElementById('btnConnect').addEventListener('click', () => {
     const code = document.getElementById('join-code').value.trim();
-    if(code.length !== 5) { alert("Lütfen 5 Haneli Kodu Eksiksiz Girin!"); return; }
+    if (code.length !== 5) { alert('5 haneli kodu girin!'); return; }
 
     document.getElementById('viewer-setup').style.display = 'none';
     document.getElementById('main').style.display = 'flex';
-    document.getElementById('cam-controls').style.display = 'none';
     document.getElementById('lock-controls').style.display = 'block';
     isCamera = false;
-    
     video.muted = true;
 
-    connStatus.innerText = "Bağlanılıyor...";
-    aiStatus.innerText = "Görüntü Bekleniyor";
+    connStatus.innerText = 'Bağlanılıyor...';
+    aiStatus.innerText = 'Görüntü bekleniyor';
     pulse.className = 'pulse';
 
     peer = new Peer({ debug: 0 });
 
-    peer.on('open', (id) => {
-        const targetPeerId = `phtrck-${code}`;
-        
-        conn = peer.connect(targetPeerId);
-        
+    peer.on('open', () => {
+        conn = peer.connect('phtrck-' + code);
+
         conn.on('open', () => {
-            connStatus.innerText = "Bağlandı!";
+            connStatus.innerText = 'Bağlandı!';
             pulse.className = 'pulse green';
             conn.send({ type: 'viewer_ready' });
+            // İzleyici de çizim döngüsüne başlasın
+            viewerLoop();
         });
 
-        conn.on('data', handleAlertData);
-        
+        conn.on('data', handleViewerData);
+
         conn.on('close', () => {
-            connStatus.innerText = "Bağlantı Koptu!";
+            connStatus.innerText = 'Bağlantı koptu!';
             pulse.className = 'pulse';
-            if(isAlerting) clearAlertDisplay();
+            clearAlertDisplay();
         });
     });
 
     peer.on('call', (incomingCall) => {
         call = incomingCall;
         call.answer();
-        
         call.on('stream', (remoteStream) => {
             if (!video.srcObject) {
                 video.srcObject = remoteStream;
-                aiStatus.innerText = "✅ Canlı İzleniyor: " + code;
-                aiStatus.style.color = "#4CAF50";
+                aiStatus.innerText = '✅ Canlı izleniyor: ' + code;
+                aiStatus.style.color = '#4CAF50';
             }
         });
     });
@@ -492,95 +468,90 @@ function connectToCamera() {
     peer.on('error', (err) => {
         console.error(err);
         if (err.type === 'peer-unavailable') {
-            alert("Kamera bulunamadı! Kodu kontrol edin ve Kameranın açık olduğundan emin olun.");
+            alert('Kamera bulunamadı! Kodu kontrol edin.');
             location.reload();
         }
     });
-}
+});
 
 // =================== İZLEYİCİ ÇİZİM ===================
-function viewerDrawBoxes(data) {
-    if (isCamera) return;
-    
-    if (canvas.width !== video.videoWidth && video.videoWidth > 0) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-    }
-    if (canvas.width === 0 || canvas.height === 0) return;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    
-    const scaleX = canvas.width / data.w;
-    const scaleY = canvas.height / data.h;
-    
-    if (data.lockedTarget) {
-        const [x, y, w, h] = data.lockedTarget;
-        const mx = x * scaleX, my = y * scaleY, mw = w * scaleX, mh = h * scaleY;
-        
-        ctx.strokeStyle = '#00FF00'; 
-        ctx.fillStyle = '#00FF00';
-        ctx.lineWidth = 4;
-        ctx.strokeRect(mx, my, mw, mh);
-        
-        ctx.font = 'bold 22px Arial';
-        ctx.fillText(`🎯 KİLİTLİ HEDEF`, mx, my > 25 ? my - 10 : 25);
-        document.getElementById('unlockBtn').style.display = 'block';
-    } else {
-        data.people.forEach(bbox => {
-            const [x, y, w, h] = bbox;
-            const mx = x * scaleX, my = y * scaleY, mw = w * scaleX, mh = h * scaleY;
-            
-            ctx.strokeStyle = '#00bcd4'; 
-            ctx.fillStyle = '#00bcd4';
-            ctx.lineWidth = 3;
-            ctx.strokeRect(mx, my, mw, mh);
-            
-            ctx.font = '18px Arial';
-            ctx.fillText(`👆 Dokun`, mx, my > 20 ? my - 10 : 20);
-            
-            ctx.beginPath();
-            ctx.arc(mx + mw/2, my + mh/2, 8, 0, 2 * Math.PI);
-            ctx.fillStyle = 'rgba(0, 188, 212, 0.6)';
-            ctx.fill();
-        });
-        document.getElementById('unlockBtn').style.display = 'none';
-    }
-}
+let viewerTrackData = null;
 
-// =================== ALARM SİSTEMİ ===================
-function handleAlertData(data) {
-    if (data.type === 'person_out') {
+function handleViewerData(data) {
+    if (data.type === 'tracking_data') {
+        viewerTrackData = data;
+    } else if (data.type === 'person_out') {
         if (!isAlerting) {
             isAlerting = true;
-            alertBox.style.display = 'flex'; 
-            aiStatus.innerText = "UYARI: KAMERADAKİ KİŞİ AYRILDI!";
-            aiStatus.style.color = "#ff0000";
-            
+            alertBox.style.display = 'flex';
+            aiStatus.innerText = 'UYARI: HEDEF KAYIP!';
+            aiStatus.style.color = '#ff0000';
             if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
             vibrateInterval = setInterval(() => {
                 if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
-            }, 800); 
+            }, 800);
         }
     } else if (data.type === 'person_in') {
         clearAlertDisplay();
-    } else if (data.type === 'tracking_data') {
-        viewerDrawBoxes(data);
     }
+}
+
+function viewerLoop() {
+    if (isCamera) return;
+
+    if (video.readyState >= 4) {
+        if (canvas.width !== video.videoWidth && video.videoWidth > 0) {
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+        }
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        if (viewerTrackData && viewerTrackData.rect) {
+            const d = viewerTrackData;
+            const scX = canvas.width / d.w;
+            const scY = canvas.height / d.h;
+            const [rx, ry, rw, rh] = d.rect;
+            const mx = rx * scX, my = ry * scY, mw = rw * scX, mh = rh * scY;
+
+            if (d.found) {
+                ctx.strokeStyle = '#00FF00';
+                ctx.lineWidth = 4;
+                ctx.strokeRect(mx, my, mw, mh);
+                ctx.fillStyle = '#00FF00';
+                ctx.font = 'bold 20px Arial';
+                ctx.fillText('🎯 KİLİTLİ', mx, my > 25 ? my - 8 : 25);
+                unlockBtn.style.display = 'block';
+            } else {
+                ctx.strokeStyle = '#FF9800';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([8, 8]);
+                ctx.strokeRect(mx, my, mw, mh);
+                ctx.setLineDash([]);
+                ctx.fillStyle = '#FF9800';
+                ctx.font = 'bold 18px Arial';
+                ctx.fillText('⚠ Aranıyor...', mx, my > 25 ? my - 8 : 25);
+            }
+        } else {
+            // Henüz hedef seçilmemiş
+            ctx.fillStyle = 'rgba(0, 188, 212, 0.8)';
+            ctx.font = 'bold 22px Arial';
+            const text = '👆 Kişiye dokunun';
+            const tm = ctx.measureText(text);
+            ctx.fillText(text, (canvas.width - tm.width) / 2, canvas.height / 2);
+        }
+    }
+
+    setTimeout(() => requestAnimationFrame(viewerLoop), 50);
 }
 
 function clearAlertDisplay() {
     if (isAlerting) {
         isAlerting = false;
-        alertBox.style.display = 'none'; 
-        aiStatus.innerText = "✅ Canlı ve İzleniyor";
-        aiStatus.style.color = "#4CAF50";
+        alertBox.style.display = 'none';
+        aiStatus.innerText = '✅ Canlı izleniyor';
+        aiStatus.style.color = '#4CAF50';
         clearInterval(vibrateInterval);
     }
 }
-
-// =================== GLOBAL FONKSİYONLAR ===================
-// type="module" ile yüklenen script'lerde onclick="..." çalışması için
-// fonksiyonları window'a bağlıyoruz
-window.startCameraMode = startCameraMode;
-window.showViewerInput = showViewerInput;
-window.connectToCamera = connectToCamera;

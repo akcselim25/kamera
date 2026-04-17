@@ -3,28 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Mobil AI Kamera Takip</title>
+    <title>Mobil Kamera Takip</title>
     <meta name="theme-color" content="#111111">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600;800&display=swap" rel="stylesheet">
     
     <!-- PeerJS: WebRTC bağlantısı -->
     <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
-    <!-- NOT: TensorFlow.js KALDIRILDI - Çok ağırdı. Yerine MediaPipe WASM kullanılıyor (5-10x hızlı) -->
     
     <style>
         * { box-sizing: border-box; }
-        body { margin: 0; font-family: 'Segoe UI', sans-serif; text-align: center; background: #111; color: #fff; overflow-x: hidden; touch-action: manipulation; }
-        h1 { margin: 15px auto; font-size: 22px; color: #00bcd4; }
-        h2 { margin: 10px auto; font-size: 18px; color: #fff; }
+        body { margin: 0; font-family: 'Segoe UI', Tahoma, sans-serif; text-align: center; background: #111; color: #fff; overflow-x: hidden; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
         
-        .video-container { position: relative; width: 100%; max-width: 100%; height: auto; margin: 0 auto; background: #000; display: flex; box-shadow: 0 4px 15px rgba(0,0,0,0.8); }
-        video { width: 100%; height: auto; max-height: 70vh; display: block; object-fit: cover; }
+        .video-container { position: relative; width: 100%; max-width: 100%; margin: 0 auto; background: #000; display: flex; }
+        video { width: 100%; height: auto; max-height: 75vh; display: block; object-fit: cover; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: auto; }
         
         #role-selection { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; background: linear-gradient(135deg, #1f1c2c, #928DAB); }
-        #role-selection h1 { font-size: 28px; color: #fff; text-shadow: 2px 2px 5px rgba(0,0,0,0.5); font-weight: 800; margin-bottom: 30px; }
+        #role-selection h1 { font-size: 28px; color: #fff; text-shadow: 2px 2px 5px rgba(0,0,0,0.5); font-weight: 800; margin-bottom: 10px; }
+        #role-selection p.sub { color: #ccc; font-size: 13px; margin-bottom: 25px; }
         
         .card { background: rgba(0,0,0,0.4); padding: 30px 20px; border-radius: 16px; width: 100%; max-width: 400px; backdrop-filter: blur(10px); box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
         .btn { padding: 18px 30px; font-size: 18px; margin: 10px 0; cursor: pointer; border-radius: 12px; border: none; font-weight: bold; width: 100%; transition: 0.3s; display: flex; align-items: center; justify-content: center; gap: 10px; color: white; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
@@ -45,24 +42,17 @@
             z-index: 9999; padding: 20px; text-shadow: 2px 2px 10px rgba(0,0,0,0.8);
         }
         #alert span { font-size: 80px; display: block; margin-bottom: 15px; }
+        @keyframes sirenBlink { 0% { background: #ff0000; } 50% { background: #000; } 100% { background: #ff0000; } }
         
-        @keyframes sirenBlink { 
-            0% { background: #ff0000; color: #ffffff; } 
-            50% { background: #000000; color: #ff0000; } 
-            100% { background: #ff0000; color: #ffffff; } 
-        }
-        
-        #status-bar { padding: 10px; background: #222; border-bottom: 1px solid #444; font-size: 13px; font-weight: bold; color: #aaa;  display: flex; justify-content: space-between; align-items: center; }
+        #status-bar { padding: 10px; background: #222; border-bottom: 1px solid #444; font-size: 13px; font-weight: bold; color: #aaa; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 5px; }
         .pulse { display: inline-block; width: 10px; height: 10px; background: #f44336; border-radius: 50%; box-shadow: 0 0 8px #f44336; animation: pulseFade 1.5s infinite; margin-right: 5px; }
         .pulse.green { background: #4CAF50; box-shadow: 0 0 8px #4CAF50; }
         @keyframes pulseFade { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
         
         #main { display: none; height: 100vh; flex-direction: column; }
 
-        /* Yükleme Barı */
-        .loading-bar { width: 100%; height: 4px; background: #333; border-radius: 2px; margin-top: 10px; overflow: hidden; }
-        .loading-bar-fill { height: 100%; background: linear-gradient(90deg, #00bcd4, #4CAF50); width: 0%; transition: width 0.3s; animation: loadPulse 1.5s ease-in-out infinite; }
-        @keyframes loadPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+        #lock-controls { display: none; background: #1e1e1e; padding: 12px 15px; border-bottom: 1px solid #333; text-align: center; }
+        #lock-controls p { margin: 0 0 8px; font-size: 13px; }
     </style>
 </head>
 <body>
@@ -71,51 +61,43 @@
         DİKKAT!<br>HEDEF KADRAJDAN ÇIKTI!
     </div>
 
-    <!-- 1. GİRİŞ VE ROL SEÇİMİ -->
     <div id="role-selection">
-        <h1>📱 Mobil AI İzleme</h1>
+        <h1>📱 Kamera Takip</h1>
+        <p class="sub">AI modeli YOK — Anında açılır, kasma olmaz.<br>İki telefon, sadece internet yeterli.</p>
         <div class="card">
-            <p style="color: #ddd; margin-bottom: 25px; font-size: 14px;">Bilgisayara ihtiyaç duymadan, doğrudan iki telefon ile çalışır. İnternetinizin olması yeterlidir.</p>
-            <button class="btn btn-cam" onclick="startCameraMode()">📸 KAMERA OL (Yayıncı)</button>
+            <button class="btn btn-cam" id="btnCam">📸 KAMERA OL</button>
             <div style="height: 1px; background: rgba(255,255,255,0.2); margin: 20px 0;"></div>
-            <button class="btn btn-view" onclick="showViewerInput()">👀 İZLEYİCİ OL (Takipçi)</button>
+            <button class="btn btn-view" id="btnView">👀 İZLEYİCİ OL</button>
         </div>
     </div>
 
-    <!-- 2. İZLEYİCİ KOD GİRİŞ EKRANI -->
     <div id="viewer-setup" style="display:none; height: 100vh; flex-direction: column; justify-content: center; align-items: center; padding: 20px; background: #111;">
         <div class="card">
-            <h2 style="margin-bottom: 20px;">Kameraya Bağlan</h2>
-            <p style="font-size: 14px; margin-bottom: 15px; color:#aaa;">Kamera cihazında ekranda görünen kodu aşağıya girin:</p>
-            <input type="text" id="join-code" class="input-code" placeholder="ÖRN: 12345" maxlength="5">
-            <button class="btn btn-view" onclick="connectToCamera()">Bağlan ve İzle 🚀</button>
-            <button class="btn" style="background:#444; margin-top:15px;" onclick="location.reload()">Geri Dön</button>
+            <h2 style="margin: 0 0 20px; font-size: 18px;">Kameraya Bağlan</h2>
+            <p style="font-size: 14px; margin-bottom: 15px; color:#aaa;">Kamera telefonundaki 5 haneli kodu girin:</p>
+            <input type="text" id="join-code" class="input-code" placeholder="12345" maxlength="5" inputmode="numeric">
+            <button class="btn btn-view" id="btnConnect">Bağlan 🚀</button>
+            <button class="btn" style="background:#444; margin-top:15px;" onclick="location.reload()">Geri</button>
         </div>
     </div>
 
-    <!-- 3. ANA UYGULAMA EKRANI -->
     <div id="main">
         <div id="status-bar">
             <div><span class="pulse" id="conn-pulse"></span><span id="conn-status">Bağlantı Bekleniyor...</span></div>
-            <div id="ai-status" style="color:#00bcd4">AI Hazırlanıyor...</div>
+            <div id="ai-status" style="color:#00bcd4">Hazır</div>
         </div>
         
-        <!-- Kamera Yayıncıya Özel Kısım -->
         <div id="cam-controls" style="display:none; background:#1e1e1e; padding:15px; border-bottom: 1px solid #333;">
-            <div id="code-container" class="info-box" style="margin:0;">
+            <div class="info-box" style="margin:0;">
                 <p style="margin: 0 0 5px 0; font-size: 12px; color: #aaa;">İZLEYİCİ BAĞLANTI KODU:</p>
                 <div class="code-display" id="my-code">....</div>
                 <p style="margin: 5px 0 0 0; font-size: 11px; color:#ff9800;">Diğer telefondan İzleyici Ol'u seçip bu kodu girin.</p>
             </div>
         </div>
         
-        <div id="lock-controls" style="display:none; background:#1e1e1e; padding:15px; border-bottom: 1px solid #333; text-align:center;">
-            <p style="margin: 0 0 10px; font-size: 13px; color: #fff;">Hedeflemek istediğiniz kişiye ekranda <b style="color:#00bcd4">dokunun</b>.</p>
-            <button id="unlockBtn" class="btn btn-action" style="display:none; margin: 0 auto;" onclick="unlockTarget()">Kilidi Sıfırla 🔓</button>
-            <div id="loading-container" style="display:none;">
-                <p id="loading-text" style="margin: 5px 0; font-size: 12px; color: #aaa;">AI Yükleniyor...</p>
-                <div class="loading-bar"><div class="loading-bar-fill" id="loading-fill"></div></div>
-            </div>
+        <div id="lock-controls">
+            <p style="color:#fff;">İzlemek istediğiniz kişiye <b style="color:#00bcd4">dokunun</b>.</p>
+            <button id="unlockBtn" class="btn btn-action" style="display:none; margin: 0 auto;">Kilidi Sıfırla 🔓</button>
         </div>
 
         <div class="video-container">
@@ -124,6 +106,6 @@
         </div>
     </div>
 
-    <script type="module" src="app.js"></script>
+    <script src="app.js"></script>
 </body>
 </html>
