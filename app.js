@@ -16,13 +16,32 @@ const pulse = document.getElementById('conn-pulse');
 // AI Değişkenleri
 let model = null;
 let lastPersonTime = Date.now();
-const ALERT_TIMEOUT = 1000;
+const ALERT_TIMEOUT = 1500; // 1.5 saniye görünmezse alarm
 let isAlerting = false;
 let vibrateInterval;
 
 let currentPeople = [];
 let lockedTarget = null;
 let isDetecting = false;
+
+// === PERFORMANS OPTİMİZASYONU ===
+// AI küçük bir offscreen canvas üzerinde çalışır (çok hızlı!)
+// Kamera 720p çeker ama AI sadece 320x240 işler = 18x daha az piksel
+const AI_WIDTH = 320;
+const AI_HEIGHT = 240;
+const aiCanvas = document.createElement('canvas');
+aiCanvas.width = AI_WIDTH;
+aiCanvas.height = AI_HEIGHT;
+const aiCtx = aiCanvas.getContext('2d');
+
+// Filtreleme sabitleri
+const CONFIDENCE_THRESHOLD = 0.45;
+const MIN_BBOX_RATIO = 0.015; // Ekranın %1.5'inden küçük kutuları reddet
+
+function isValidPersonShape(w, h) {
+    const ratio = h / w;
+    return ratio > 0.7 && ratio < 6.0;
+}
 
 // 1. Rastgele 5 Haneli Kod Oluşturucu
 function generateCode() {
@@ -31,12 +50,10 @@ function generateCode() {
 
 /** Tıklama Olayları: Yeni Kişi Seçme ve Kilitleme Mantığı */
 canvas.addEventListener('click', (e) => {
-    // Canvasın ekrandaki boyutuna göre tıklama koordinatlarını bul
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     
-    // Touch API destekliyse e.touches kontrolü de yapılabilinir, ama basit click yetiyor PWA'da
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clientY = e.touches ? e.touches[0].clientY : e.clientY;
     
@@ -85,13 +102,12 @@ window.unlockTarget = function() {
     aiStatus.innerText = "Sistem Hazır - Kişiye Dokunun";
     aiStatus.style.color = "#00bcd4";
     
-    // İzleyiciye her şey yolunda sinyali gönder
     if(conn && conn.open) {
         conn.send({ type: 'person_in' });
     }
 }
 
-// Gelişmiş hedef takibi için IoU hesaplama (Kutu Kesişimi)
+// IoU hesaplama
 function getIoU(box1, box2) {
     const [x1, y1, w1, h1] = box1;
     const [x2, y2, w2, h2] = box2;
@@ -104,24 +120,20 @@ function getIoU(box1, box2) {
     return interArea / ((w1 * h1) + (w2 * h2) - interArea);
 }
 
-// Minimum kutu boyutu: Çok küçük kutular genelde yanlış algılama (false positive)
-const MIN_BBOX_WIDTH = 40;
-const MIN_BBOX_HEIGHT = 60;
-const CONFIDENCE_THRESHOLD = 0.50; // Daha yüksek güven eşiği = daha az yanlış algılama
-
-// İnsan en/boy oranı kontrolü: Gerçek bir insan çok yatay veya çok karesele yakın olmaz
-function isValidPersonShape(w, h) {
-    const ratio = h / w; // İnsan dikey olur, genelde 1.2 ile 5.0 arası
-    return ratio > 0.8 && ratio < 6.0;
-}
-
 /** 2. YAPAY ZEKA MODELLERİ */
 async function loadModel() {
     aiStatus.innerText = "Yapay Zeka Yükleniyor...";
-    try { await tf.ready(); } catch(e) {}
     
-    // Doğruluk için tam mobilenet_v2 kullanıyoruz, throttle ile performans dengeleniyor
-    model = await cocoSsd.load({base: 'mobilenet_v2'});
+    // WebGL backend'i zorla (GPU hızlandırma)
+    try {
+        await tf.setBackend('webgl');
+        await tf.ready();
+    } catch(e) {
+        try { await tf.ready(); } catch(e2) {}
+    }
+    
+    // lite_mobilenet_v2: Telefonda çok hızlı, offscreen canvas ile doğruluk yeterli
+    model = await cocoSsd.load({base: 'lite_mobilenet_v2'});
     aiStatus.innerText = "Sistem Hazır - İzleyici Bekleniyor...";
     
     video.addEventListener('loadedmetadata', () => {
@@ -145,17 +157,34 @@ async function detectFrame() {
 
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        const predictions = await model.detect(video);
+        // === PERFORMANS SIRRI: Küçük canvas'a çiz, AI onu işlesin ===
+        // 720p videoyu 320x240'a küçült → AI 18x daha az piksel işler
+        aiCtx.drawImage(video, 0, 0, AI_WIDTH, AI_HEIGHT);
+        const predictions = await model.detect(aiCanvas);
         
-        // SADECE İNSANLARI FİLTRELE: Yüksek güven + minimum boyut + şekil kontrolü
+        // Ölçek faktörleri: AI koordinatlarını gerçek video boyutuna çevir
+        const scaleX = video.videoWidth / AI_WIDTH;
+        const scaleY = video.videoHeight / AI_HEIGHT;
+        
+        const videoArea = video.videoWidth * video.videoHeight;
+        
+        // Filtreleme + ölçekleme
         currentPeople = predictions.filter(p => {
             if (p.class !== 'person' || p.score < CONFIDENCE_THRESHOLD) return false;
             const [, , w, h] = p.bbox;
-            // Çok küçük kutuları reddet (gürültü / yanlış algılama)
-            if (w < MIN_BBOX_WIDTH || h < MIN_BBOX_HEIGHT) return false;
-            // İnsan şekline uymayan kutuları reddet
-            if (!isValidPersonShape(w, h)) return false;
+            const realW = w * scaleX;
+            const realH = h * scaleY;
+            // Çok küçük kutuları reddet (ekran alanının %1.5'inden az)
+            if ((realW * realH) < (videoArea * MIN_BBOX_RATIO)) return false;
+            if (!isValidPersonShape(realW, realH)) return false;
             return true;
+        }).map(p => {
+            // Koordinatları gerçek video boyutuna ölçekle
+            const [x, y, w, h] = p.bbox;
+            return {
+                ...p,
+                bbox: [x * scaleX, y * scaleY, w * scaleX, h * scaleY]
+            };
         });
 
         let targetFound = false;
@@ -176,25 +205,20 @@ async function detectFrame() {
                 const prevH = lockedTarget.bbox[3];
                 const maxDim = Math.max(prevW, prevH) || 1;
                 
-                // Hedef takibini sapmamak üzere IoU (kesişim), mesafe ve boyut oranları ile çok daha hassaslaştırdık
                 const distRatio = dist / maxDim;
                 const currentArea = w * h;
                 const prevArea = prevW * prevH;
                 const sizeRatio = Math.min(currentArea, prevArea) / Math.max(currentArea, prevArea); 
                 
-                // Hedefin başka birine yanlışlıkla kaymaması için cezalar artırıldı.
                 let score = (iou * 4.0) + (sizeRatio * 1.5) - (distRatio * 3.5);
                 
-                // Çok alakasız (farklı boyutta ya da çok uzak) birine atlamaması için sıkı kontrol:
-                // Kesişim (IoU) hiç olmazsa bile en azından kutu boyutu benzer (%60) ve çok yakın (< 1.0) olmalı
-                if ((iou > 0.1 || (distRatio < 1.0 && sizeRatio > 0.6)) && score > bestScore) {
+                if ((iou > 0.1 || (distRatio < 1.0 && sizeRatio > 0.5)) && score > bestScore) {
                     bestScore = score;
                     bestMatch = person;
                 }
             });
 
-            // Aşırı düşük güvenli bir eşleşme ise yanlış kişiye atlama (eski sınır -1.0, şimdi daha güvenli 0.5 yapıldı)
-            if (bestScore < 0.5) {
+            if (bestScore < 0.3) {
                 bestMatch = null;
             }
 
@@ -213,7 +237,7 @@ async function detectFrame() {
                 ctx.fillText(`🎯 KİLİTLİ HEDEF`, x, y > 25 ? y - 10 : 25);
             }
 
-            // Diğer umursanmayan kişiler
+            // Diğer kişiler
             currentPeople.forEach(person => {
                 if (person !== bestMatch) {
                     const [px, py, pw, ph] = person.bbox;
@@ -224,7 +248,7 @@ async function detectFrame() {
             });
 
         } else {
-            // MAVİ SEÇİLEBİLİR REK
+            // MAVİ SEÇİLEBİLİR KUTULAR
             currentPeople.forEach(person => {
                 const [x, y, w, h] = person.bbox;
                 ctx.strokeStyle = '#00bcd4'; 
@@ -244,7 +268,7 @@ async function detectFrame() {
             targetFound = true; 
         }
 
-        // ALARM MANTIĞI: Veriyi PeerJS DataChannel ile ilet
+        // ALARM MANTIĞI
         if (lockedTarget) {
             if (targetFound) {
                 lastPersonTime = Date.now();
@@ -279,11 +303,10 @@ async function detectFrame() {
         isDetecting = false;
     }
     
-    // Telefonun aşırı ısınıp kasmasını engellemek için AI saniyede max ~8 kez çalıştırılır.
-    // Tam model kullandığımız için 120ms ideal denge noktası (doğruluk vs performans)
+    // 150ms aralık: saniyede ~6-7 AI taraması (telefon için ideal denge)
     setTimeout(() => {
         requestAnimationFrame(detectFrame);
-    }, 120);
+    }, 150);
 }
 
 /** 3. KAMERA YAYINCI SEÇENEĞİ */
@@ -293,10 +316,17 @@ async function startCameraMode() {
     document.getElementById('main').style.display = 'flex';
     document.getElementById('cam-controls').style.display = 'block';
     
-    // Kamerayı aç
+    // Kamerayı aç - 720p: uzaktakini görecek kadar net, kasmayacak kadar hafif
     let stream;
     try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+        stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { 
+                facingMode: "environment", 
+                width: { ideal: 1280 }, 
+                height: { ideal: 720 } 
+            }, 
+            audio: false 
+        });
         video.srcObject = stream;
         video.muted = true;
     } catch (err) {
@@ -305,8 +335,6 @@ async function startCameraMode() {
         return;
     }
 
-    // Telefonlar-arası ID'yi basitleştirmek için kısa kod kullanıyoruz, 
-    // ama gerçek Peer id olarak prefix koyalım ki çakışma olmasın.
     const shortCode = generateCode();
     const peerId = `phtrck-${shortCode}`;
     document.getElementById('my-code').innerText = shortCode;
@@ -314,14 +342,13 @@ async function startCameraMode() {
     connStatus.innerText = "Sunucuya Kayıt Olunuyor...";
     pulse.className = 'pulse';
 
-    // PeerJS Başlat: STUN serverlar varsayılan PeerJS cloud'da ücretsiz.
-    peer = new Peer(peerId, { debug: 2 });
+    peer = new Peer(peerId, { debug: 0 }); // debug: 0 = konsol çıktısı yok (performans)
     
     peer.on('open', (id) => {
         connStatus.innerText = "Yayınla... İzleyici Bekleniyor!";
         pulse.className = 'pulse green';
         document.getElementById('lock-controls').style.display = 'block';
-        loadModel(); // Model yüklemeye başla
+        loadModel();
     });
 
     peer.on('connection', (connection) => {
@@ -330,7 +357,6 @@ async function startCameraMode() {
         
         conn.on('data', (data) => {
             if(data.type === 'viewer_ready') {
-                // İzleyici hazır, ona medyayı gönder
                 peer.call(conn.peer, stream);
             } else if (data.type === 'viewer_click') {
                 const clickX = (data.x / data.w) * canvas.width;
@@ -366,29 +392,26 @@ function connectToCamera() {
 
     document.getElementById('viewer-setup').style.display = 'none';
     document.getElementById('main').style.display = 'flex';
-    document.getElementById('cam-controls').style.display = 'none'; // kamera kontrolleri gizli
-    document.getElementById('lock-controls').style.display = 'block'; // izleyici kilit kontrollerini görsün
+    document.getElementById('cam-controls').style.display = 'none';
+    document.getElementById('lock-controls').style.display = 'block';
     isCamera = false;
     
-    video.muted = true; // Telefondan telefona izleme ses sorun olabiliyor.
+    video.muted = true;
 
     connStatus.innerText = "Bağlanılıyor...";
     aiStatus.innerText = "Görüntü Bekleniyor";
     pulse.className = 'pulse';
 
-    // Kendi rastgele peer ID'mizle bağlan
-    peer = new Peer({ debug: 2 });
+    peer = new Peer({ debug: 0 });
 
     peer.on('open', (id) => {
         const targetPeerId = `phtrck-${code}`;
         
-        // Veri bağlantısı kur (Alarmlar için)
         conn = peer.connect(targetPeerId);
         
         conn.on('open', () => {
             connStatus.innerText = "Bağlandı!";
             pulse.className = 'pulse green';
-            // Bağlandığımı bildir ki beni arasın
             conn.send({ type: 'viewer_ready' });
         });
 
@@ -401,10 +424,9 @@ function connectToCamera() {
         });
     });
 
-    // Medya gelirse oynat
     peer.on('call', (incomingCall) => {
         call = incomingCall;
-        call.answer(); // Gelen çağrıyı sadesiyle kabul et (biz bir şey göndermiyoruz)
+        call.answer();
         
         call.on('stream', (remoteStream) => {
             if (!video.srcObject) {
