@@ -31,8 +31,6 @@ function generateCode() {
 
 /** Tıklama Olayları: Yeni Kişi Seçme ve Kilitleme Mantığı */
 canvas.addEventListener('click', (e) => {
-    if (!isCamera || !currentPeople || currentPeople.length === 0) return;
-    
     // Canvasın ekrandaki boyutuna göre tıklama koordinatlarını bul
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -44,6 +42,15 @@ canvas.addEventListener('click', (e) => {
     
     const clickX = (clientX - rect.left) * scaleX;
     const clickY = (clientY - rect.top) * scaleY;
+
+    if (!isCamera) {
+        if (conn && conn.open) {
+            conn.send({ type: 'viewer_click', x: clickX, y: clickY, w: canvas.width, h: canvas.height });
+        }
+        return;
+    }
+
+    if (!currentPeople || currentPeople.length === 0) return;
 
     for (let person of currentPeople) {
         const [x, y, w, h] = person.bbox;
@@ -67,6 +74,14 @@ function lockOnPerson(person) {
 window.unlockTarget = function() {
     lockedTarget = null;
     document.getElementById('unlockBtn').style.display = 'none';
+    
+    if (!isCamera) {
+        if (conn && conn.open) conn.send({ type: 'viewer_unlock' });
+        aiStatus.innerText = "Kilit Açıldı - Kişiye Dokunun";
+        aiStatus.style.color = "#00bcd4";
+        return;
+    }
+
     aiStatus.innerText = "Sistem Hazır - Kişiye Dokunun";
     aiStatus.style.color = "#00bcd4";
     
@@ -89,12 +104,23 @@ function getIoU(box1, box2) {
     return interArea / ((w1 * h1) + (w2 * h2) - interArea);
 }
 
+// Minimum kutu boyutu: Çok küçük kutular genelde yanlış algılama (false positive)
+const MIN_BBOX_WIDTH = 40;
+const MIN_BBOX_HEIGHT = 60;
+const CONFIDENCE_THRESHOLD = 0.50; // Daha yüksek güven eşiği = daha az yanlış algılama
+
+// İnsan en/boy oranı kontrolü: Gerçek bir insan çok yatay veya çok karesele yakın olmaz
+function isValidPersonShape(w, h) {
+    const ratio = h / w; // İnsan dikey olur, genelde 1.2 ile 5.0 arası
+    return ratio > 0.8 && ratio < 6.0;
+}
+
 /** 2. YAPAY ZEKA MODELLERİ */
 async function loadModel() {
     aiStatus.innerText = "Yapay Zeka Yükleniyor...";
     try { await tf.ready(); } catch(e) {}
     
-    // Daha tutarlı ve gelişmiş doğruluk için mobilenet_v2 bazlı modeli kullanıyoruz
+    // Doğruluk için tam mobilenet_v2 kullanıyoruz, throttle ile performans dengeleniyor
     model = await cocoSsd.load({base: 'mobilenet_v2'});
     aiStatus.innerText = "Sistem Hazır - İzleyici Bekleniyor...";
     
@@ -121,8 +147,16 @@ async function detectFrame() {
 
         const predictions = await model.detect(video);
         
-        // SADECE İNSANLARI FİLTRELE (Tam kare alabilmesi için eşiği optimize ettik)
-        currentPeople = predictions.filter(p => p.class === 'person' && p.score > 0.35);
+        // SADECE İNSANLARI FİLTRELE: Yüksek güven + minimum boyut + şekil kontrolü
+        currentPeople = predictions.filter(p => {
+            if (p.class !== 'person' || p.score < CONFIDENCE_THRESHOLD) return false;
+            const [, , w, h] = p.bbox;
+            // Çok küçük kutuları reddet (gürültü / yanlış algılama)
+            if (w < MIN_BBOX_WIDTH || h < MIN_BBOX_HEIGHT) return false;
+            // İnsan şekline uymayan kutuları reddet
+            if (!isValidPersonShape(w, h)) return false;
+            return true;
+        });
 
         let targetFound = false;
 
@@ -148,17 +182,19 @@ async function detectFrame() {
                 const prevArea = prevW * prevH;
                 const sizeRatio = Math.min(currentArea, prevArea) / Math.max(currentArea, prevArea); 
                 
-                let score = (iou * 2.5) + sizeRatio - (distRatio * 1.5);
+                // Hedefin başka birine yanlışlıkla kaymaması için cezalar artırıldı.
+                let score = (iou * 4.0) + (sizeRatio * 1.5) - (distRatio * 3.5);
                 
                 // Çok alakasız (farklı boyutta ya da çok uzak) birine atlamaması için sıkı kontrol:
-                if ((iou > 0.05 || (distRatio < 1.5 && sizeRatio > 0.4)) && score > bestScore) {
+                // Kesişim (IoU) hiç olmazsa bile en azından kutu boyutu benzer (%60) ve çok yakın (< 1.0) olmalı
+                if ((iou > 0.1 || (distRatio < 1.0 && sizeRatio > 0.6)) && score > bestScore) {
                     bestScore = score;
                     bestMatch = person;
                 }
             });
 
-            // Aşırı düşük güvenli bir eşleşme ise yanlış kişiye atlama
-            if (bestScore < -1.0) {
+            // Aşırı düşük güvenli bir eşleşme ise yanlış kişiye atlama (eski sınır -1.0, şimdi daha güvenli 0.5 yapıldı)
+            if (bestScore < 0.5) {
                 bestMatch = null;
             }
 
@@ -229,10 +265,25 @@ async function detectFrame() {
             }
         }
         
+        if (conn && conn.open) {
+            conn.send({
+                type: 'tracking_data',
+                w: canvas.width,
+                h: canvas.height,
+                people: currentPeople.map(p => p.bbox),
+                lockedTarget: lockedTarget ? lockedTarget.bbox : null,
+                targetFound: targetFound
+            });
+        }
+        
         isDetecting = false;
     }
     
-    requestAnimationFrame(detectFrame);
+    // Telefonun aşırı ısınıp kasmasını engellemek için AI saniyede max ~8 kez çalıştırılır.
+    // Tam model kullandığımız için 120ms ideal denge noktası (doğruluk vs performans)
+    setTimeout(() => {
+        requestAnimationFrame(detectFrame);
+    }, 120);
 }
 
 /** 3. KAMERA YAYINCI SEÇENEĞİ */
@@ -245,7 +296,7 @@ async function startCameraMode() {
     // Kamerayı aç
     let stream;
     try {
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
         video.srcObject = stream;
         video.muted = true;
     } catch (err) {
@@ -281,6 +332,19 @@ async function startCameraMode() {
             if(data.type === 'viewer_ready') {
                 // İzleyici hazır, ona medyayı gönder
                 peer.call(conn.peer, stream);
+            } else if (data.type === 'viewer_click') {
+                const clickX = (data.x / data.w) * canvas.width;
+                const clickY = (data.y / data.h) * canvas.height;
+                
+                for (let person of currentPeople) {
+                    const [px, py, pw, ph] = person.bbox;
+                    if (clickX >= px && clickX <= px + pw && clickY >= py && clickY <= py + ph) {
+                        lockOnPerson(person);
+                        break;
+                    }
+                }
+            } else if (data.type === 'viewer_unlock') {
+                unlockTarget();
             }
         });
         
@@ -303,6 +367,7 @@ function connectToCamera() {
     document.getElementById('viewer-setup').style.display = 'none';
     document.getElementById('main').style.display = 'flex';
     document.getElementById('cam-controls').style.display = 'none'; // kamera kontrolleri gizli
+    document.getElementById('lock-controls').style.display = 'block'; // izleyici kilit kontrollerini görsün
     isCamera = false;
     
     video.muted = true; // Telefondan telefona izleme ses sorun olabiliyor.
@@ -359,6 +424,60 @@ function connectToCamera() {
     });
 }
 
+function viewerDrawBoxes(data) {
+    if (isCamera) return;
+    
+    if (canvas.width !== video.videoWidth && video.videoWidth > 0) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+    }
+    if (canvas.width === 0 || canvas.height === 0) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    const scaleX = canvas.width / data.w;
+    const scaleY = canvas.height / data.h;
+    
+    if (data.lockedTarget) {
+        const [x, y, w, h] = data.lockedTarget;
+        const mappedX = x * scaleX;
+        const mappedY = y * scaleY;
+        const mappedW = w * scaleX;
+        const mappedH = h * scaleY;
+        
+        ctx.strokeStyle = '#00FF00'; 
+        ctx.fillStyle = '#00FF00';
+        ctx.lineWidth = 4;
+        ctx.strokeRect(mappedX, mappedY, mappedW, mappedH);
+        
+        ctx.font = 'bold 22px Arial';
+        ctx.fillText(`🎯 KİLİTLİ HEDEF`, mappedX, mappedY > 25 ? mappedY - 10 : 25);
+        document.getElementById('unlockBtn').style.display = 'block';
+    } else {
+        data.people.forEach(bbox => {
+            const [x, y, w, h] = bbox;
+            const mappedX = x * scaleX;
+            const mappedY = y * scaleY;
+            const mappedW = w * scaleX;
+            const mappedH = h * scaleY;
+            
+            ctx.strokeStyle = '#00bcd4'; 
+            ctx.fillStyle = '#00bcd4';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(mappedX, mappedY, mappedW, mappedH);
+            
+            ctx.font = '18px Arial';
+            ctx.fillText(`👆 Dokun`, mappedX, mappedY > 20 ? mappedY - 10 : 20);
+            
+            ctx.beginPath();
+            ctx.arc(mappedX + mappedW/2, mappedY + mappedH/2, 8, 0, 2 * Math.PI);
+            ctx.fillStyle = 'rgba(0, 188, 212, 0.6)';
+            ctx.fill();
+        });
+        document.getElementById('unlockBtn').style.display = 'none';
+    }
+}
+
 function handleAlertData(data) {
     if (data.type === 'person_out') {
         if (!isAlerting) {
@@ -374,6 +493,8 @@ function handleAlertData(data) {
         }
     } else if (data.type === 'person_in') {
         clearAlertDisplay();
+    } else if (data.type === 'tracking_data') {
+        viewerDrawBoxes(data);
     }
 }
 
