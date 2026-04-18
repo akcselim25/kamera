@@ -146,9 +146,11 @@ function updateLockedTarget() {
         const sizeRatio = Math.min(w * h, lockedBbox[2] * lockedBbox[3]) /
                           Math.max(w * h, lockedBbox[2] * lockedBbox[3]);
 
-        const score = (iou * 5) + (sizeRatio * 2) - (distRatio * 3);
+        // Daha katı bir takip algoritması (Mesafe değişimini ağır cezalandırır)
+        const score = (iou * 10) + (sizeRatio * 5) - (distRatio * 15);
 
-        if ((iou > 0.05 || (distRatio < 2.0 && sizeRatio > 0.3)) && score > bestScore) {
+        // Bir başkasına sıçramaması için kuralları katılaştırdık
+        if ((iou > 0.15 || (distRatio < 0.8 && sizeRatio > 0.5)) && score > bestScore) {
             bestScore = score;
             bestMatch = p;
         }
@@ -408,21 +410,23 @@ document.getElementById('btnCam').addEventListener('click', async () => {
         return;
     }
 
-    // 2. PeerJS'i HEMEN başlat
-    const code = Math.floor(10000 + Math.random() * 90000).toString();
-    document.getElementById('mc').innerText = code;
-    cs.innerText = 'Kayıt olunuyor...';
+    // 2. PeerJS'i HEMEN başlat (Arka planda hazırlandıysa onu kullan)
+    document.getElementById('mc').innerText = precode;
+    peer = prepeer;
 
-    peer = new Peer('phtrck-' + code, { debug: 0 });
-
-    peer.on('open', () => {
+    const setupHost = () => {
         cs.innerText = 'Hazır — İzleyici bekleniyor';
         cp.className = 'p g';
-        // Çizim döngüsünü başlat (anında, AI olmadan bile çalışır)
         drawLoop();
-        // 3. AI'yı ARKA PLANDA yükle (bekletmez)
         loadAI();
-    });
+    };
+
+    if (peer.open) {
+        setupHost();
+    } else {
+        cs.innerText = 'Bağlanıyor (Hızlandırıldı)...';
+        peer.on('open', setupHost);
+    }
 
     peer.on('connection', (c) => {
         conn = c;
@@ -457,6 +461,8 @@ document.getElementById('btnCam').addEventListener('click', async () => {
 // =================== İZLEYİCİ MODU ===================
 
 document.getElementById('btnView').addEventListener('click', () => {
+    // İzleyici moduna geçilirse, kamera için hazırlanan peer'ı yokedip baştan bağlan
+    if(prepeer && !prepeer.destroyed) prepeer.destroy();
     document.getElementById('role').style.display = 'none';
     document.getElementById('vs').style.display = 'flex';
 });
@@ -574,6 +580,12 @@ function viewerDraw() {
 
     requestAnimationFrame(viewerDraw);
 }
+
+// =================== ARKA PLAN OPTİMİZASYONLARI ===================
+// Kullanıcı "Kamera Ol" demeden önce bekleme süresini SIFIRA indirmek için:
+// Sayfa açılır açılmaz PeerJS id'si alınmaya başlar (Background Pre-fetch)
+let precode = Math.floor(10000 + Math.random() * 90000).toString();
+let prepeer = new Peer('phtrck-' + precode, { debug: 0 });
 
 // Global exports for onclick handlers
 window.unlockTarget = unlockTarget;
