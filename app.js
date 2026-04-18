@@ -251,8 +251,8 @@ function drawLoop() {
                     // Alarm ve düşürme kontrolü
                     const elapsed = Date.now() - lastFoundTime;
                     
-                    if (elapsed >= 5000) {
-                        // 5 saniye boyunca hiç gelmezse tamamen unut (ikazı da kapatır)
+                    if (elapsed >= 7000) {
+                        // 7 saniye boyunca hiç gelmezse tamamen unut (ikazı da kapatır)
                         unlockTarget();
                     } else if (elapsed >= LOST_TIMEOUT) {
                         // 2 saniye geçince alarm çalmaya başla
