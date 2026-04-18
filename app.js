@@ -51,7 +51,7 @@ async function loadAI() {
         if (lt) lt.innerText = 'Model İndiriliyor (Coco-SSD)...';
         if (lf) lf.style.width = '60%';
 
-        detector = await cocoSsd.load({ base: 'mobilenet_v2' });
+        detector = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
 
         if (lf) lf.style.width = '100%';
         if (lt) lt.innerText = 'Hazır!';
@@ -371,7 +371,7 @@ document.getElementById('btnCam').addEventListener('click', async () => {
     let stream;
     try {
         stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+            video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
             audio: false
         });
         vid.srcObject = stream;
