@@ -248,9 +248,14 @@ function drawLoop() {
                     ctx.strokeRect(x, y, w, h);
                     ctx.setLineDash([]);
 
-                    // Alarm kontrolü
+                    // Alarm ve düşürme kontrolü
                     const elapsed = Date.now() - lastFoundTime;
-                    if (elapsed >= LOST_TIMEOUT) {
+                    
+                    if (elapsed >= 5000) {
+                        // 5 saniye boyunca hiç gelmezse tamamen unut (ikazı da kapatır)
+                        unlockTarget();
+                    } else if (elapsed >= LOST_TIMEOUT) {
+                        // 2 saniye geçince alarm çalmaya başla
                         if (as_.innerText !== '❌ HEDEF KAYIP!') {
                             as_.innerText = '❌ HEDEF KAYIP!';
                             as_.style.color = '#f44336';
@@ -315,15 +320,22 @@ cvs.addEventListener('click', (e) => {
 
     if (!modelReady || people.length === 0) return;
 
-    // SADECE kutunun İÇİNE tıklanırsa seç (boşluğa tıklanırsa hiçbir şey yapma)
+    // SADECE kutunun İÇİNE tıklanırsa seç, BOŞLUĞA tıklanırsa kilidi kaldır
+    let clickedPerson = false;
     for (const p of people) {
         const [x, y, w, h] = p.bbox;
         if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) {
             lockToPerson(p.bbox);
+            clickedPerson = true;
             return;
         }
     }
-    // Kutu dışına tıklandı → hiçbir şey yapma
+    
+    // Boşluğa tıklandıysa ve halihazırda kilitli bir hedef varsa kilidi aç
+    if (!clickedPerson && lockedBbox) {
+        unlockTarget();
+        if (conn && conn.open) conn.send({ type: 'viewer_unlock' }); // Diğer tarafa da bildir
+    }
 });
 
 ub.addEventListener('click', () => {
@@ -400,13 +412,18 @@ document.getElementById('btnCam').addEventListener('click', async () => {
             else if (d.type === 'viewer_click') {
                 const cx = (d.x / d.w) * cvs.width;
                 const cy = (d.y / d.h) * cvs.height;
-                // SADECE kutunun İÇİNE tıklanırsa seç
+                // SADECE kutunun İÇİNE tıklanırsa seç, BOŞLUĞA tıklanırsa kaldır
+                let clickedPerson = false;
                 for (const p of people) {
                     const [x, y, w, h] = p.bbox;
                     if (cx >= x && cx <= x + w && cy >= y && cy <= y + h) {
                         lockToPerson(p.bbox);
+                        clickedPerson = true;
                         break;
                     }
+                }
+                if (!clickedPerson && lockedBbox) {
+                    unlockTarget();
                 }
             }
             else if (d.type === 'viewer_unlock') unlockTarget();
