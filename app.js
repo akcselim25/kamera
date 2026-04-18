@@ -33,7 +33,9 @@ const LOST_TIMEOUT = 2000;  // 2 saniye bulunamazsa alarm
 let isAlerting = false;
 let vibInt;
 
-// =================== MEDIAPIPE YÜKLEME ===================
+// =================== YÜKLEME VE İŞÇİ (WORKER) YÖNETİMİ ===================
+let aiWorker = null;
+let detecting = false;
 
 async function loadAI() {
     const ld = document.getElementById('ld');
@@ -41,104 +43,83 @@ async function loadAI() {
     const lt = document.getElementById('lt');
     if (ld) ld.style.display = 'block';
 
+    if (lt) lt.innerText = 'AI Arka Plana Yükleniyor...';
+    if (lf) lf.style.width = '30%';
+
     try {
-        if (lt) lt.innerText = 'MediaPipe yükleniyor...';
-        if (lf) lf.style.width = '20%';
+        aiWorker = new Worker('worker.js', { type: 'module' });
 
-        const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+        aiWorker.onmessage = (e) => {
+            const data = e.data;
+            if (data.type === 'ready') {
+                if (lf) lf.style.width = '100%';
+                if (lt) lt.innerText = 'Hazır!';
+                modelReady = true;
+                as_.innerText = 'AI Hazır — Kişiye dokunun';
+                as_.style.color = '#4CAF50';
+                setTimeout(() => { if (ld) ld.style.display = 'none'; }, 600);
+                detectLoop(); // Döngüyü başlat
+            } else if (data.type === 'error') {
+                console.error('Worker AI Hatası:', data.error);
+                if (lt) lt.innerText = 'Hata: ' + data.error;
+            } else if (data.type === 'result') {
+                processDetections(data.detections);
+                detecting = false; // yeni frame gönderilebilir
+            }
+        };
 
-        if (lt) lt.innerText = 'WASM hazırlanıyor...';
-        if (lf) lf.style.width = '50%';
-
-        const resolver = await vision.FilesetResolver.forVisionTasks(
-            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-        );
-
-        if (lt) lt.innerText = 'Model indiriliyor...';
-        if (lf) lf.style.width = '75%';
-
-        try {
-            detector = await vision.ObjectDetector.createFromOptions(resolver, {
-                baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite',
-                    delegate: 'GPU'
-                },
-                categoryAllowlist: ['person'],
-                scoreThreshold: 0.45,
-                maxResults: 15,
-                runningMode: 'VIDEO'
-            });
-        } catch (e) {
-            // GPU başarısızsa CPU'ya düş
-            detector = await vision.ObjectDetector.createFromOptions(resolver, {
-                baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite',
-                    delegate: 'CPU'
-                },
-                categoryAllowlist: ['person'],
-                scoreThreshold: 0.45,
-                maxResults: 15,
-                runningMode: 'VIDEO'
-            });
-        }
-
-        if (lf) lf.style.width = '100%';
-        if (lt) lt.innerText = 'Hazır!';
-        modelReady = true;
-        as_.innerText = 'AI Hazır — Kişiye dokunun';
-        as_.style.color = '#4CAF50';
-
-        setTimeout(() => { if (ld) ld.style.display = 'none'; }, 600);
-
-        // Algılama döngüsünü başlat
-        detectLoop();
+        if (lf) lf.style.width = '60%';
+        aiWorker.postMessage({ type: 'init' });
 
     } catch (err) {
-        console.error('AI yükleme hatası:', err);
-        if (lt) lt.innerText = 'AI yüklenemedi: ' + err.message;
-        as_.innerText = 'AI Hatası!';
-        as_.style.color = '#f44336';
+        console.error('Worker oluşturma hatası:', err);
     }
 }
 
-// =================== ALGILAMA DÖNGÜSÜ (1 FPS) ===================
+function processDetections(detections) {
+    // Sonuçları bbox formatına çevir
+    people = detections.map(d => ({
+        bbox: [d.boundingBox.originX, d.boundingBox.originY, d.boundingBox.width, d.boundingBox.height],
+        score: d.categories[0].score
+    }));
+
+    // Kilitli hedefi güncelle
+    if (lockedBbox) {
+        updateLockedTarget();
+    }
+
+    // İzleyiciye gönder
+    if (conn && conn.open) {
+        conn.send({
+            type: 'tracking_data',
+            w: vid.videoWidth,
+            h: vid.videoHeight,
+            people: people.map(p => p.bbox),
+            locked: lockedBbox,
+            found: lockedBbox ? isTargetFound() : false
+        });
+    }
+}
+
+// =================== ALGILAMA DÖNGÜSÜ (WORKER) ===================
 
 async function detectLoop() {
-    if (!isCamera || !detector || !modelReady) return;
+    if (!isCamera || !aiWorker || !modelReady) return;
 
-    if (vid.readyState >= 4) {
+    if (vid.readyState >= 4 && !detecting) {
         try {
-            const result = detector.detectForVideo(vid, performance.now());
-
-            // Sonuçları bbox formatına çevir
-            people = result.detections.map(d => ({
-                bbox: [d.boundingBox.originX, d.boundingBox.originY, d.boundingBox.width, d.boundingBox.height],
-                score: d.categories[0].score
-            }));
-
-            // Kilitli hedefi güncelle
-            if (lockedBbox) {
-                updateLockedTarget();
-            }
-
-            // İzleyiciye gönder
-            if (conn && conn.open) {
-                conn.send({
-                    type: 'tracking_data',
-                    w: vid.videoWidth,
-                    h: vid.videoHeight,
-                    people: people.map(p => p.bbox),
-                    locked: lockedBbox,
-                    found: lockedBbox ? isTargetFound() : false
-                });
-            }
+            detecting = true;
+            // Frame'i kopyalayıp worker'a pasla (ÇOK HIZLI, ANA THREAD KASILMAZ)
+            const bitmap = await createImageBitmap(vid);
+            aiWorker.postMessage({ type: 'detect', bitmap: bitmap }, [bitmap]);
         } catch (e) {
-            console.error('Detection error:', e);
+            console.error('Frame kopyalama hatası:', e);
+            detecting = false;
         }
     }
 
-    // 1 saniyede 1 algılama çok yavaştı, 10 FPS (100ms) yapıyoruz:
-    setTimeout(detectLoop, 100);
+    // AI'a çok yüklenmemek için ufak bir bekleme (yaklaşık 10-15 FPS yakalar)
+    setTimeout(detectLoop, 60);
 }
 
 // =================== HEDEF TAKİP ===================
