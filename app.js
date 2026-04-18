@@ -42,45 +42,16 @@ async function loadAI() {
     if (ld) ld.style.display = 'block';
 
     try {
-        if (lt) lt.innerText = 'MediaPipe yükleniyor...';
+        if (lt) lt.innerText = 'TFJS Arka Uç Bağlanıyor...';
         if (lf) lf.style.width = '20%';
 
-        const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs');
+        await tf.ready();
+        await tf.setBackend('webgl'); // GPU hızlandırması garanti
 
-        if (lt) lt.innerText = 'WASM hazırlanıyor...';
-        if (lf) lf.style.width = '50%';
+        if (lt) lt.innerText = 'Model İndiriliyor (Coco-SSD)...';
+        if (lf) lf.style.width = '60%';
 
-        const resolver = await vision.FilesetResolver.forVisionTasks(
-            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-        );
-
-        if (lt) lt.innerText = 'Model indiriliyor...';
-        if (lf) lf.style.width = '75%';
-
-        try {
-            detector = await vision.ObjectDetector.createFromOptions(resolver, {
-                baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite',
-                    delegate: 'GPU'
-                },
-                categoryAllowlist: ['person'],
-                scoreThreshold: 0.45,
-                maxResults: 15,
-                runningMode: 'VIDEO'
-            });
-        } catch (e) {
-            // GPU başarısızsa CPU'ya düş
-            detector = await vision.ObjectDetector.createFromOptions(resolver, {
-                baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite',
-                    delegate: 'CPU'
-                },
-                categoryAllowlist: ['person'],
-                scoreThreshold: 0.45,
-                maxResults: 15,
-                runningMode: 'VIDEO'
-            });
-        }
+        detector = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
 
         if (lf) lf.style.width = '100%';
         if (lt) lt.innerText = 'Hazır!';
@@ -101,20 +72,25 @@ async function loadAI() {
     }
 }
 
-// =================== ALGILAMA DÖNGÜSÜ (ANA THREAD) ===================
+// =================== ALGILAMA DÖNGÜSÜ ===================
+let detecting = false;
 
 async function detectLoop() {
     if (!isCamera || !detector || !modelReady) return;
 
-    if (vid.readyState >= 4) {
+    if (vid.readyState >= 4 && !detecting) {
+        detecting = true;
         try {
-            const result = detector.detectForVideo(vid, performance.now());
+            // Asenkron algılama. Kamerayı DONDURMAZ!
+            const predictions = await detector.detect(vid);
 
-            // Sonuçları bbox formatına çevir
-            people = result.detections.map(d => ({
-                bbox: [d.boundingBox.originX, d.boundingBox.originY, d.boundingBox.width, d.boundingBox.height],
-                score: d.categories[0].score
-            }));
+            // Sonuçları [x, y, w, h] formatına çevir (sadece person sınıfı)
+            people = predictions
+                .filter(p => p.class === 'person' && p.score > 0.45)
+                .map(p => ({
+                    bbox: [p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]],
+                    score: p.score
+                }));
 
             // Kilitli hedefi güncelle
             if (lockedBbox) {
@@ -135,10 +111,11 @@ async function detectLoop() {
         } catch (e) {
             console.error('Detection error:', e);
         }
+        detecting = false;
     }
 
-    // AI'a çok yüklenmemek için ufak bir bekleme (480p olduğu için inanılmaz hızlı olacak)
-    setTimeout(detectLoop, 20);
+    // AI kareleri arasında nefes alma süresi.
+    setTimeout(detectLoop, 15);
 }
 
 // =================== HEDEF TAKİP ===================
