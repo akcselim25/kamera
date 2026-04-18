@@ -222,6 +222,12 @@ function drawLoop() {
                     ctx.font = 'bold 20px Arial';
                     ctx.fillText('🎯 KİLİTLİ', x, y > 25 ? y - 8 : 25);
 
+                    // EĞER hedef tekrar döndüyse ve alarm çalıyorsa alarmı sustur
+                    if (isAlerting) {
+                        clearAlertDisplay();
+                        if (conn && conn.open) conn.send({ type: 'person_in' });
+                    }
+
                     if (as_.innerText.indexOf('✅') === -1 && as_.innerText.indexOf('KİLİT') === -1) {
                         as_.innerText = '✅ Hedef görüş alanında';
                         as_.style.color = '#4CAF50';
