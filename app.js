@@ -136,8 +136,8 @@ async function detectLoop() {
         }
     }
 
-    // 1 saniyede 1 algılama (telefonu kasmaz!)
-    setTimeout(detectLoop, 1000);
+    // 1 saniyede 1 algılama çok yavaştı, 10 FPS (100ms) yapıyoruz:
+    setTimeout(detectLoop, 100);
 }
 
 // =================== HEDEF TAKİP ===================
