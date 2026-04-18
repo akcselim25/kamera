@@ -19,5 +19,8 @@
     "react-native-webrtc": "^124.0.7",
     "react-native-webview": "13.15.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "babel-preset-expo": "^55.0.17"
+  }
 }

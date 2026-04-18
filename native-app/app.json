@@ -21,7 +21,9 @@
         "CAMERA",
         "INTERNET",
         "VIBRATE",
-        "ACCESS_NETWORK_STATE"
+        "ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ],
       "package": "com.kameratakip.app"
     },
@@ -42,6 +44,12 @@
           }
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2415df1f-4aee-48c5-acf5-bf7e43b17988"
+      }
+    },
+    "owner": "selimakclk"
   }
 }
