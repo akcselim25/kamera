@@ -51,7 +51,7 @@ async function loadAI() {
         if (lt) lt.innerText = 'Model İndiriliyor (Coco-SSD)...';
         if (lf) lf.style.width = '60%';
 
-        detector = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
+        detector = await cocoSsd.load({ base: 'mobilenet_v2' });
 
         if (lf) lf.style.width = '100%';
         if (lt) lt.innerText = 'Hazır!';
@@ -86,7 +86,7 @@ async function detectLoop() {
 
             // Sonuçları [x, y, w, h] formatına çevir (sadece person sınıfı)
             people = predictions
-                .filter(p => p.class === 'person' && p.score > 0.45)
+                .filter(p => p.class === 'person' && p.score > 0.35)
                 .map(p => ({
                     bbox: [p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]],
                     score: p.score
@@ -371,7 +371,7 @@ document.getElementById('btnCam').addEventListener('click', async () => {
     let stream;
     try {
         stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
             audio: false
         });
         vid.srcObject = stream;
