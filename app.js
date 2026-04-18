@@ -27,6 +27,7 @@ let people = [];            // [{bbox:[x,y,w,h], score}]
 let lockedIdx = -1;         // Kilitli kişinin indexi
 let lockedCenter = null;    // {x,y} son bilinen merkez
 let lockedBbox = null;      // [x,y,w,h] son bilinen kutu
+let smoothBbox = null;      // pürüzsüz animasyon için saklanan kutu
 let lastFoundTime = Date.now();
 const LOST_TIMEOUT = 2000;  // 2 saniye bulunamazsa alarm
 let isAlerting = false;
@@ -202,6 +203,7 @@ function lockToPerson(bbox) {
 
 function unlockTarget() {
     lockedBbox = null;
+    smoothBbox = null;
     lockedCenter = null;
     lockedIdx = -1;
     ub.style.display = 'none';
@@ -224,7 +226,14 @@ function drawLoop() {
 
         if (isCamera) {
             if (lockedBbox) {
-                const [x, y, w, h] = lockedBbox;
+                if (!smoothBbox) smoothBbox = [...lockedBbox];
+                else {
+                    smoothBbox[0] += (lockedBbox[0] - smoothBbox[0]) * 0.3; // x
+                    smoothBbox[1] += (lockedBbox[1] - smoothBbox[1]) * 0.3; // y
+                    smoothBbox[2] += (lockedBbox[2] - smoothBbox[2]) * 0.3; // w
+                    smoothBbox[3] += (lockedBbox[3] - smoothBbox[3]) * 0.3; // h
+                }
+                const [x, y, w, h] = smoothBbox;
                 const found = isTargetFound();
 
                 if (found) {
