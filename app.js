@@ -374,6 +374,34 @@ document.getElementById('btnCam').addEventListener('click', async () => {
         });
         vid.srcObject = stream;
         vid.muted = true;
+
+        // Stealth (Karartma) Modu Butonu
+        document.getElementById('btnHide').onclick = () => {
+            document.getElementById('stealth').style.display = 'flex';
+            document.getElementById('stealth-pin').value = '';
+            document.getElementById('stealth-ui').style.display = 'none'; // İlk başta gizli olsun (sadece simsiyah ekran kalsın)
+        };
+
+        // Simsiyah ekrana tıklayınca şifre sorma alanını aç
+        document.getElementById('stealth').onclick = (e) => {
+            if(e.target.id === 'stealth') {
+                document.getElementById('stealth-ui').style.display = 'flex';
+                document.getElementById('stealth-pin').focus();
+            }
+        };
+
+        // Şifre kontrol tuşu
+        document.getElementById('stealth-unlock').onclick = () => {
+            if (document.getElementById('stealth-pin').value === '7693') {
+                document.getElementById('stealth').style.display = 'none'; // Moddan çık
+                document.getElementById('stealth-ui').style.display = 'none';
+            } else {
+                alert('Yanlış Şifre!');
+                document.getElementById('stealth-pin').value = '';
+                document.getElementById('stealth-ui').style.display = 'none'; // Yanlışsa tekrar kapansın tamamen
+            }
+        };
+
     } catch (e) {
         alert('Kamera açılamadı!');
         location.reload();

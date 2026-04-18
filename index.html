@@ -41,9 +41,19 @@
         .lbar-f{height:100%;background:linear-gradient(90deg,#00bcd4,#4CAF50);transition:width .3s;animation:lp 1.5s infinite}
         @keyframes lp{0%,100%{opacity:1}50%{opacity:.5}}
         #vs{display:none;height:100vh;flex-direction:column;justify-content:center;align-items:center;padding:20px;background:#111}
+        #stealth{display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:99999;flex-direction:column;justify-content:center;align-items:center}
+        #stealth-ui{display:none;flex-direction:column;align-items:center;padding:20px}
     </style>
 </head>
 <body>
+<!-- GİZLİ SİYAH EKRAN (STEALTH MOD) -->
+<div id="stealth">
+    <div id="stealth-ui">
+        <input type="password" id="stealth-pin" class="inp" placeholder="****" maxlength="4" style="width:150px; background:#222; color:#fff; border:1px solid #444;" inputmode="numeric">
+        <button id="stealth-unlock" class="btn" style="background:#333; max-width:150px;">Aç</button>
+    </div>
+</div>
+
 <div id="alert"><span>🚨</span>DİKKAT!<br>HEDEF KADRAJDAN ÇIKTI!</div>
 
 <div id="role">
@@ -81,6 +91,7 @@
             <div class="code" id="mc">....</div>
             <p style="font-size:10px;color:#ff9800">Diğer telefonda İzleyici Ol'u seçip bu kodu girin.</p>
         </div>
+        <button id="btnHide" class="btn" style="background:#000; border:1px solid #444; margin-top:10px; padding:8px; font-size:14px; width:auto; display:inline-block;">Ekranı Karart 👁️‍🗨️</button>
     </div>
     <div id="lc" class="ctrl" style="display:none">
         <p style="font-size:13px;color:#fff;margin-bottom:6px">Kişiye <b style="color:#00bcd4">dokunun</b></p>
@@ -96,6 +107,6 @@
     </div>
 </div>
 
-<script type="module" src="app.js?v=18"></script>
+<script type="module" src="app.js?v=20"></script>
 </body>
 </html>
