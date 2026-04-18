@@ -63,7 +63,7 @@ async function loadAI() {
                     delegate: 'GPU'
                 },
                 categoryAllowlist: ['person'],
-                scoreThreshold: 0.20,
+                scoreThreshold: 0.45,
                 maxResults: 15,
                 runningMode: 'VIDEO'
             });
@@ -75,7 +75,7 @@ async function loadAI() {
                     delegate: 'CPU'
                 },
                 categoryAllowlist: ['person'],
-                scoreThreshold: 0.20,
+                scoreThreshold: 0.45,
                 maxResults: 15,
                 runningMode: 'VIDEO'
             });
