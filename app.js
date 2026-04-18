@@ -59,7 +59,7 @@ async function loadAI() {
         try {
             detector = await vision.ObjectDetector.createFromOptions(resolver, {
                 baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
+                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite',
                     delegate: 'GPU'
                 },
                 categoryAllowlist: ['person'],
@@ -71,7 +71,7 @@ async function loadAI() {
             // GPU başarısızsa CPU'ya düş
             detector = await vision.ObjectDetector.createFromOptions(resolver, {
                 baseOptions: {
-                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
+                    modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite',
                     delegate: 'CPU'
                 },
                 categoryAllowlist: ['person'],
