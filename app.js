@@ -118,8 +118,8 @@ async function detectLoop() {
         }
     }
 
-    // AI'a çok yüklenmemek için ufak bir bekleme (yaklaşık 10-15 FPS yakalar)
-    setTimeout(detectLoop, 60);
+    // AI'a çok yüklenmemek için ufak bir bekleme (hızı artırmak için 20ms'ye düşürüldü)
+    setTimeout(detectLoop, 20);
 }
 
 // =================== HEDEF TAKİP ===================
@@ -367,7 +367,7 @@ document.getElementById('btnCam').addEventListener('click', async () => {
     let stream;
     try {
         stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+            video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
             audio: false
         });
         vid.srcObject = stream;
