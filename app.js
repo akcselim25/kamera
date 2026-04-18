@@ -34,7 +34,6 @@ let isAlerting = false;
 let vibInt;
 
 // =================== YÜKLEME ===================
-let detector = null;
 
 async function loadAI() {
     const ld = document.getElementById('ld');
