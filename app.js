@@ -33,6 +33,8 @@ let lastFoundTime = Date.now();
 const LOST_TIMEOUT = 2000;  // 2 saniye bulunamazsa alarm
 let isAlerting = false;
 let vibInt;
+let memoryMode = false;
+let currentFilter = 'none'; // 'none', 'thermal', 'night'
 
 // =================== YÜKLEME ===================
 
@@ -278,7 +280,10 @@ function drawLoop() {
                     
                     if (elapsed >= 7000) {
                         // 7 saniye boyunca hiç gelmezse tamamen unut (ikazı da kapatır)
-                        unlockTarget();
+                        // EĞER HAFIZA MODU AÇIKSA ASLA UNUTMA!
+                        if (!memoryMode) {
+                            unlockTarget();
+                        }
                     } else if (elapsed >= LOST_TIMEOUT) {
                         // 2 saniye geçince alarm çalmaya başla
                         if (as_.innerText !== '❌ HEDEF KAYIP!') {
@@ -435,6 +440,36 @@ document.getElementById('btnCam').addEventListener('click', async () => {
             }
         };
 
+        // Yeni Butonlar: Termal, Gece, Hafıza
+        const setFilter = (filterName) => {
+            currentFilter = filterName;
+            vid.className = 'filter-' + filterName;
+            cvs.className = 'filter-' + filterName;
+            if (conn && conn.open) {
+                conn.send({ type: 'set_filter', filter: filterName });
+            }
+        };
+
+        document.getElementById('btnThermal').onclick = () => {
+            setFilter(currentFilter === 'thermal' ? 'none' : 'thermal');
+        };
+
+        document.getElementById('btnNight').onclick = () => {
+            setFilter(currentFilter === 'night' ? 'none' : 'night');
+        };
+
+        document.getElementById('btnMemory').onclick = () => {
+            memoryMode = !memoryMode;
+            const btn = document.getElementById('btnMemory');
+            if (memoryMode) {
+                btn.innerText = '🧠 Hafıza Açık';
+                btn.style.background = 'rgba(100,100,255,0.6)';
+            } else {
+                btn.innerText = '🧠 Hafıza Kapalı';
+                btn.style.background = 'rgba(100,100,255,0.2)';
+            }
+        };
+
     } catch (e) {
         alert('Kamera açılamadı!');
         location.reload();
@@ -557,6 +592,10 @@ function handleViewerData(d) {
     if (d.type === 'tracking_data') vData = d;
     else if (d.type === 'person_out') triggerAlert();
     else if (d.type === 'person_in') clearAlertDisplay();
+    else if (d.type === 'set_filter') {
+        vid.className = 'filter-' + d.filter;
+        cvs.className = 'filter-' + d.filter;
+    }
 }
 
 function viewerDraw() {

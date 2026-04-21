@@ -72,6 +72,11 @@
         
         /* Overlay grid for cyberpunk feel */
         .grid-overlay { position:absolute; top:0; left:0; width:100%; height:100%; background-image: linear-gradient(rgba(0,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,255,0.03) 1px, transparent 1px); background-size: 30px 30px; pointer-events:none; z-index:5; }
+        
+        /* Video Filters */
+        .filter-none { filter: none; }
+        .filter-night { filter: sepia(100%) hue-rotate(90deg) saturate(400%) brightness(1.5) contrast(1.2); }
+        .filter-thermal { filter: invert(1) hue-rotate(270deg) contrast(3) saturate(5) sepia(0.5); }
     </style>
 </head>
 <body>
@@ -129,7 +134,12 @@
                     <div class="code" id="mc">....</div>
                     <p style="font-size:12px;color:#ffaa00;font-weight:500;">Diğer cihazda "İzleyici Ol" seçeneği ile bu kodu girin.</p>
                 </div>
-                <button id="btnHide" class="btn" style="background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.1); padding:14px; font-size:14px; text-transform:none; letter-spacing:0;">👁️‍🗨️ Ekranı Karart (Gizli Mod)</button>
+                <div style="display:flex; flex-wrap:wrap; gap:8px; margin-top:10px;">
+                    <button id="btnHide" class="btn" style="flex:1 1 45%; background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.1); padding:10px; font-size:12px; text-transform:none;">👁️‍🗨️ Karart</button>
+                    <button id="btnThermal" class="btn" style="flex:1 1 45%; background:rgba(255,100,0,0.2); border:1px solid rgba(255,100,0,0.5); padding:10px; font-size:12px; text-transform:none;">🔥 Termal</button>
+                    <button id="btnNight" class="btn" style="flex:1 1 45%; background:rgba(0,255,100,0.2); border:1px solid rgba(0,255,100,0.5); padding:10px; font-size:12px; text-transform:none;">🌑 Gece</button>
+                    <button id="btnMemory" class="btn" style="flex:1 1 45%; background:rgba(100,100,255,0.2); border:1px solid rgba(100,100,255,0.5); padding:10px; font-size:12px; text-transform:none;">🧠 Hafıza Kapalı</button>
+                </div>
             </div>
             
             <div id="lc" class="ctrl" style="display:none">
