@@ -1,9 +1,10 @@
-import { ObjectDetector, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js';
-
 let detector = null;
 
 async function init() {
     try {
+        const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js');
+        const { ObjectDetector, FilesetResolver } = vision;
+
         const resolver = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm');
         detector = await ObjectDetector.createFromOptions(resolver, {
             baseOptions: {

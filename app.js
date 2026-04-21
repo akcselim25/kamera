@@ -47,7 +47,7 @@ async function loadAI() {
     if (lt) lt.innerText = 'AI İş Parçacığı Başlatılıyor...';
     if (lf) lf.style.width = '30%';
 
-    aiWorker = new Worker('worker.js', { type: 'module' });
+    aiWorker = new Worker('worker.js?v=31');
     
     aiWorker.onmessage = (e) => {
         if (e.data.type === 'ready') {
