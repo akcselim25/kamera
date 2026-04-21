@@ -8,41 +8,70 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
     <style>
-        *{box-sizing:border-box;margin:0;padding:0}
-        body{font-family:'Segoe UI',Tahoma,sans-serif;background:#111;color:#fff;text-align:center;overflow-x:hidden;touch-action:manipulation;-webkit-user-select:none;user-select:none}
-        .vc{position:relative;width:100%;background:#000;display:flex}
-        video{width:100%;height:auto;max-height:78vh;display:block;object-fit:cover}
-        canvas{position:absolute;top:0;left:0;width:100%;height:100%;z-index:10;pointer-events:auto}
-        #role{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:20px;background:linear-gradient(135deg,#1f1c2c,#928DAB)}
-        .card{background:rgba(0,0,0,.45);padding:28px 20px;border-radius:16px;width:100%;max-width:400px;backdrop-filter:blur(10px)}
-        .btn{padding:16px;font-size:17px;margin:8px 0;cursor:pointer;border-radius:12px;border:none;font-weight:700;width:100%;color:#fff;display:flex;align-items:center;justify-content:center;gap:8px}
-        .btn:active{transform:scale(.97)}
-        .btn-g{background:linear-gradient(45deg,#4CAF50,#2E7D32)}
-        .btn-b{background:linear-gradient(45deg,#2196F3,#1565C0)}
-        .btn-o{background:linear-gradient(45deg,#FF9800,#EF6C00);padding:12px;font-size:15px;max-width:220px;margin:8px auto}
-        .ibox{background:rgba(255,255,255,.1);padding:14px;border-radius:10px;margin:12px 0;border:1px solid rgba(255,255,255,.15)}
-        .code{font-size:30px;font-weight:800;letter-spacing:5px;color:#4CAF50;text-shadow:0 0 10px rgba(76,175,80,.5);margin:8px 0}
-        .inp{width:100%;padding:14px;font-size:22px;text-align:center;font-weight:700;letter-spacing:5px;border-radius:10px;border:none;background:#fff;color:#333;margin-bottom:12px;inputmode:numeric}
-        #alert{display:none;position:fixed;bottom:0;left:0;width:100vw;height:50vh;justify-content:center;align-items:center;flex-direction:column;background:rgba(255,0,0,0.85);color:#fff;font-size:20px;font-weight:900;text-align:center;animation:blink .5s infinite;z-index:9999;padding:10px;backdrop-filter:blur(5px)}
-        #alert span{font-size:50px;display:block;margin-bottom:5px}
-        @media (orientation:landscape){#alert{top:0;right:0;left:auto;bottom:auto;width:50vw;height:100vh} .vc{max-height:100vh; height:auto} video{max-height:100vh}}
-        @keyframes blink{0%,100%{background:rgba(255,0,0,0.85)}50%{background:rgba(0,0,0,0.85)}}
-        #bar{padding:8px 12px;background:#222;border-bottom:1px solid #444;font-size:12px;font-weight:700;color:#aaa;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px}
-        .p{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;animation:pf 1.5s infinite}
-        .p{background:#f44336;box-shadow:0 0 6px #f44336}
-        .p.g{background:#4CAF50;box-shadow:0 0 6px #4CAF50}
-        @keyframes pf{0%,100%{opacity:1}50%{opacity:.4}}
-        #main{display:none;height:100vh;flex-direction:column}
-        .ctrl{background:#1e1e1e;padding:12px;border-bottom:1px solid #333;text-align:center}
-        .lbar{width:100%;height:3px;background:#333;border-radius:2px;margin-top:6px;overflow:hidden}
-        .lbar-f{height:100%;background:linear-gradient(90deg,#00bcd4,#4CAF50);transition:width .3s;animation:lp 1.5s infinite}
-        @keyframes lp{0%,100%{opacity:1}50%{opacity:.5}}
-        #vs{display:none;height:100vh;flex-direction:column;justify-content:center;align-items:center;padding:20px;background:#111}
-        #stealth{display:none;position:fixed;top:0;left:0;width:100vw;height:100vh;background:#000;z-index:99999;flex-direction:column;justify-content:center;align-items:center}
-        #stealth-ui{display:none;flex-direction:column;align-items:center;padding:20px}
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;900&display=swap');
+        :root { --p: #00ffff; --s: #ff0055; --bg: #0b0c10; --glass: rgba(20, 22, 30, 0.65); }
+        *{box-sizing:border-box;margin:0;padding:0; font-family:'Outfit',sans-serif;}
+        body{background:var(--bg);color:#fff;text-align:center;overflow:hidden;touch-action:manipulation;-webkit-user-select:none;user-select:none;}
+        
+        /* Glassmorphism & Backgrounds */
+        #role, #vs { min-height:100vh; display:flex; flex-direction:column; justify-content:center; align-items:center; padding:20px; background: radial-gradient(circle at 50% 0%, #1f2235 0%, #0b0c10 70%); position:relative; overflow:hidden; }
+        #role::before, #vs::before { content:''; position:absolute; top:-50%; left:-50%; width:200%; height:200%; background: radial-gradient(circle, rgba(0,255,255,0.05) 0%, transparent 50%); animation: spin 30s linear infinite; pointer-events:none; }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        
+        .card { background:var(--glass); padding:35px 25px; border-radius:24px; width:100%; max-width:400px; backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border:1px solid rgba(255,255,255,0.08); box-shadow: 0 25px 50px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.05); position:relative; z-index:10; }
+        
+        h1 { font-size:32px; font-weight:900; letter-spacing:1px; margin-bottom:8px; text-transform:uppercase; background: linear-gradient(90deg, #fff, var(--p)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-shadow: 0 0 30px rgba(0,255,255,0.3); }
+        
+        /* Buttons */
+        .btn { padding:18px; font-size:16px; margin:10px 0; cursor:pointer; border-radius:16px; border:none; font-weight:700; width:100%; color:#fff; display:flex; align-items:center; justify-content:center; gap:10px; transition:all 0.3s cubic-bezier(0.4,0,0.2,1); text-transform:uppercase; letter-spacing:1px; position:relative; overflow:hidden; }
+        .btn::after { content:''; position:absolute; top:0; left:-100%; width:50%; height:100%; background:linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent); transition:all 0.5s; }
+        .btn:hover::after { left:100%; }
+        .btn:active { transform:scale(0.96); }
+        .btn-g { background:linear-gradient(135deg, #00b4db, #0083b0); box-shadow:0 8px 25px rgba(0, 180, 219, 0.4); }
+        .btn-b { background:linear-gradient(135deg, #8E2DE2, #4A00E0); box-shadow:0 8px 25px rgba(74, 0, 224, 0.4); }
+        .btn-o { background:linear-gradient(135deg, var(--s), #c20042); padding:14px; font-size:15px; box-shadow:0 8px 25px rgba(255,0,85,0.4); }
+        .btn-app { background:linear-gradient(135deg, #11998e, #38ef7d); font-size:14px; padding:14px; box-shadow:0 8px 25px rgba(56,239,125,0.3); }
+        
+        /* Inputs & Boxes */
+        .ibox { background:rgba(0,0,0,0.3); padding:18px; border-radius:16px; margin:16px 0; border:1px solid rgba(255,255,255,0.05); box-shadow:inset 0 4px 15px rgba(0,0,0,0.5); }
+        .code { font-size:38px; font-weight:900; letter-spacing:8px; color:var(--p); text-shadow:0 0 20px rgba(0,255,255,0.6); margin:10px 0; font-variant-numeric: tabular-nums; }
+        .inp { width:100%; padding:18px; font-size:26px; text-align:center; font-weight:900; letter-spacing:8px; border-radius:16px; border:1px solid rgba(0,255,255,0.3); background:rgba(0,0,0,0.5); color:var(--p); margin-bottom:16px; transition:all 0.3s; box-shadow:inset 0 4px 15px rgba(0,0,0,0.5); outline:none; }
+        .inp:focus { border-color:var(--p); box-shadow:0 0 20px rgba(0,255,255,0.3), inset 0 4px 15px rgba(0,0,0,0.5); }
+        .inp::placeholder { color:rgba(0,255,255,0.2); }
+        
+        /* Alerts */
+        #alert { display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; justify-content:center; align-items:center; flex-direction:column; background:rgba(255,0,0,0.9); color:#fff; font-size:24px; font-weight:900; text-align:center; z-index:9999; padding:20px; backdrop-filter:blur(10px); animation:pulse-alert 1s infinite alternate; }
+        @keyframes pulse-alert { from { background:rgba(200,0,0,0.85); box-shadow:inset 0 0 50px rgba(255,0,0,0.8); } to { background:rgba(255,0,0,0.95); box-shadow:inset 0 0 150px rgba(255,0,0,1); } }
+        #alert span { font-size:70px; margin-bottom:15px; filter:drop-shadow(0 0 20px rgba(0,0,0,0.5)); animation: shake 0.5s infinite; }
+        @keyframes shake { 0%,100%{transform:translateX(0);} 25%{transform:translateX(-10px);} 75%{transform:translateX(10px);} }
+        
+        /* Main Camera UI */
+        #main { display:none; height:100vh; width:100vw; position:relative; background:#000; }
+        .vc { position:absolute; top:0; left:0; width:100%; height:100%; z-index:1; }
+        video, canvas { width:100%; height:100%; object-fit:cover; display:block; }
+        
+        /* HUD Elements */
+        #hud { position:absolute; top:0; left:0; width:100%; height:100%; z-index:20; pointer-events:none; display:flex; flex-direction:column; justify-content:space-between; padding:20px; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+        #bar { pointer-events:auto; background:var(--glass); backdrop-filter:blur(15px); -webkit-backdrop-filter:blur(15px); border:1px solid rgba(255,255,255,0.1); border-radius:20px; padding:14px 20px; display:flex; justify-content:space-between; align-items:center; box-shadow:0 10px 30px rgba(0,0,0,0.5); margin-top: env(safe-area-inset-top); }
+        #bar-left { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:#ddd; }
+        #as { font-size:13px; font-weight:800; letter-spacing:1px; text-transform:uppercase; color:var(--p); text-shadow:0 0 10px rgba(0,255,255,0.5); }
+        
+        .p { display:inline-block; width:10px; height:10px; border-radius:50%; background:#f44336; box-shadow:0 0 10px #f44336; animation:pf 1.5s infinite; }
+        .p.g { background:#00ff00; box-shadow:0 0 10px #00ff00; }
+        @keyframes pf { 0%,100%{opacity:1; transform:scale(1);} 50%{opacity:.4; transform:scale(0.8);} }
+        
+        #controls-container { pointer-events:auto; display:flex; flex-direction:column; gap:12px; width:100%; max-width:400px; margin:0 auto; }
+        .ctrl { background:var(--glass); backdrop-filter:blur(15px); -webkit-backdrop-filter:blur(15px); border:1px solid rgba(255,255,255,0.1); border-radius:24px; padding:20px; text-align:center; box-shadow:0 -10px 40px rgba(0,0,0,0.6); }
+        
+        .lbar { width:100%; height:4px; background:rgba(0,0,0,0.5); border-radius:2px; margin-top:10px; overflow:hidden; border:1px solid rgba(255,255,255,0.05); }
+        .lbar-f { height:100%; background:linear-gradient(90deg, var(--p), #00ffaa); transition:width .3s; box-shadow:0 0 10px var(--p); }
+        
+        #stealth { display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:#000; z-index:99999; flex-direction:column; justify-content:center; align-items:center; }
+        #stealth-ui { display:none; flex-direction:column; align-items:center; padding:30px; background:rgba(20,20,20,0.9); border-radius:24px; border:1px solid #333; }
+        
+        /* Overlay grid for cyberpunk feel */
+        .grid-overlay { position:absolute; top:0; left:0; width:100%; height:100%; background-image: linear-gradient(rgba(0,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,255,0.03) 1px, transparent 1px); background-size: 30px 30px; pointer-events:none; z-index:5; }
     </style>
 </head>
 <body>
@@ -57,53 +86,61 @@
 <div id="alert"><span>🚨</span>DİKKAT!<br>HEDEF KADRAJDAN ÇIKTI!</div>
 
 <div id="role">
-    <h1 style="font-size:26px;color:#fff;margin-bottom:8px">📱 Kamera Takip</h1>
-    <p style="color:#bbb;font-size:12px;margin-bottom:22px">Kamera anında açılır. AI arka planda hazırlanır.</p>
+    <h1>📱 Kamera Takip</h1>
+    <p style="color:rgba(255,255,255,0.6);font-size:14px;margin-bottom:30px;font-weight:500;">Yapay zeka destekli otonom izleme sistemi</p>
     <div class="card">
-        <button class="btn btn-g" id="btnCam">📸 KAMERA OL</button>
-        <div style="height:1px;background:rgba(255,255,255,.2);margin:16px 0"></div>
-        <button class="btn btn-b" id="btnView">👀 İZLEYİCİ OL</button>
-        <div style="height:1px;background:rgba(255,255,255,.2);margin:16px 0"></div>
+        <button class="btn btn-g" id="btnCam"><span style="font-size:20px;">📸</span> KAMERA OL</button>
+        <div style="height:1px;background:linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);margin:20px 0"></div>
+        <button class="btn btn-b" id="btnView"><span style="font-size:20px;">👁️</span> İZLEYİCİ OL</button>
+        <div style="height:1px;background:linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);margin:20px 0"></div>
         <a href="https://github.com/akcselim25/kamera/raw/main/KameraTakip.apk" style="text-decoration: none;">
-            <button class="btn" style="background:linear-gradient(45deg,#673AB7,#512DA8); font-size:15px; padding:12px;">📲 ANDROID UYGULAMASI İNDİR</button>
+            <button class="btn btn-app"><span style="font-size:18px;">📲</span> ANDROID APK İNDİR</button>
         </a>
     </div>
 </div>
 
 <div id="vs">
     <div class="card">
-        <h2 style="font-size:17px;margin-bottom:16px">Kameraya Bağlan</h2>
-        <p style="font-size:13px;color:#aaa;margin-bottom:12px">Kameradaki 5 haneli kodu girin:</p>
-        <input type="text" id="jc" class="inp" placeholder="12345" maxlength="5" inputmode="numeric">
-        <button class="btn btn-b" id="btnConn">Bağlan 🚀</button>
-        <button class="btn" style="background:#444;margin-top:12px" onclick="location.reload()">Geri</button>
+        <h2 style="font-size:22px;margin-bottom:12px;font-weight:900;">Kameraya Bağlan</h2>
+        <p style="font-size:14px;color:rgba(255,255,255,0.6);margin-bottom:20px;">Kameradaki 5 haneli kodu girin</p>
+        <input type="text" id="jc" class="inp" placeholder="12345" maxlength="5" inputmode="numeric" autocomplete="off">
+        <button class="btn btn-b" id="btnConn" style="padding:16px;">Bağlan 🚀</button>
+        <button class="btn" style="background:rgba(255,255,255,0.1);margin-top:12px;padding:12px;font-size:14px;" onclick="location.reload()">İptal Et</button>
     </div>
 </div>
 
 <div id="main">
-    <div id="bar">
-        <div><span class="p" id="cp"></span><span id="cs">Bekleniyor...</span></div>
-        <div id="as" style="color:#00bcd4">Hazırlanıyor...</div>
-    </div>
-    <div id="cc" class="ctrl" style="display:none">
-        <div class="ibox" style="margin:0">
-            <p style="font-size:11px;color:#aaa">İZLEYİCİ KODU:</p>
-            <div class="code" id="mc">....</div>
-            <p style="font-size:10px;color:#ff9800">Diğer telefonda İzleyici Ol'u seçip bu kodu girin.</p>
-        </div>
-        <button id="btnHide" class="btn" style="background:#000; border:1px solid #444; margin-top:10px; padding:8px; font-size:14px; width:auto; display:inline-block;">Ekranı Karart 👁️‍🗨️</button>
-    </div>
-    <div id="lc" class="ctrl" style="display:none">
-        <p style="font-size:13px;color:#fff;margin-bottom:6px">Kişiye <b style="color:#00bcd4">dokunun</b></p>
-        <button id="ub" class="btn btn-o" style="display:none">Kilidi Sıfırla 🔓</button>
-        <div id="ld" style="display:none">
-            <p id="lt" style="font-size:11px;color:#aaa;margin-top:6px">AI yükleniyor...</p>
-            <div class="lbar"><div class="lbar-f" id="lf" style="width:0%"></div></div>
-        </div>
-    </div>
     <div class="vc">
         <video id="vid" autoplay playsinline muted></video>
         <canvas id="cvs"></canvas>
+        <div class="grid-overlay"></div>
+    </div>
+    
+    <div id="hud">
+        <div id="bar">
+            <div id="bar-left"><span class="p" id="cp"></span><span id="cs">Bağlantı Bekleniyor...</span></div>
+            <div id="as">Yükleniyor...</div>
+        </div>
+        
+        <div id="controls-container">
+            <div id="cc" class="ctrl" style="display:none">
+                <div class="ibox">
+                    <p style="font-size:12px;color:rgba(255,255,255,0.5);letter-spacing:2px;text-transform:uppercase;font-weight:700;">BAĞLANTI KODU</p>
+                    <div class="code" id="mc">....</div>
+                    <p style="font-size:12px;color:#ffaa00;font-weight:500;">Diğer cihazda "İzleyici Ol" seçeneği ile bu kodu girin.</p>
+                </div>
+                <button id="btnHide" class="btn" style="background:rgba(0,0,0,0.5); border:1px solid rgba(255,255,255,0.1); padding:14px; font-size:14px; text-transform:none; letter-spacing:0;">👁️‍🗨️ Ekranı Karart (Gizli Mod)</button>
+            </div>
+            
+            <div id="lc" class="ctrl" style="display:none">
+                <p style="font-size:15px;color:#fff;margin-bottom:12px;font-weight:500;">Kilitlenmek için hedefe <b style="color:var(--p);text-shadow:0 0 10px rgba(0,255,255,0.5);">dokunun</b></p>
+                <button id="ub" class="btn btn-o" style="display:none; width:100%;">Hedefi Bırak 🔓</button>
+                <div id="ld" style="display:none">
+                    <p id="lt" style="font-size:12px;color:rgba(255,255,255,0.6);margin-top:5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;">YAPAY ZEKA BAŞLATILIYOR...</p>
+                    <div class="lbar"><div class="lbar-f" id="lf" style="width:0%"></div></div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 

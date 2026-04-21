@@ -19,8 +19,9 @@ const ub = document.getElementById('ub');
 
 let peer = null, conn = null, call = null;
 let isCamera = false;
-let detector = null;        // MediaPipe ObjectDetector
+let aiWorker = null;
 let modelReady = false;
+let detecting = false;
 
 // Algılanan kişiler (son detection sonucu)
 let people = [];            // [{bbox:[x,y,w,h], score}]
@@ -41,81 +42,111 @@ async function loadAI() {
     const lt = document.getElementById('lt');
     if (ld) ld.style.display = 'block';
 
-    try {
-        if (lt) lt.innerText = 'TFJS Arka Uç Bağlanıyor...';
-        if (lf) lf.style.width = '20%';
+    if (lt) lt.innerText = 'AI İş Parçacığı Başlatılıyor...';
+    if (lf) lf.style.width = '30%';
 
-        await tf.ready();
-        await tf.setBackend('webgl'); // GPU hızlandırması garanti
-
-        if (lt) lt.innerText = 'Model İndiriliyor (Coco-SSD)...';
-        if (lf) lf.style.width = '60%';
-
-        detector = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
-
-        if (lf) lf.style.width = '100%';
-        if (lt) lt.innerText = 'Hazır!';
-        modelReady = true;
-        as_.innerText = 'AI Hazır — Kişiye dokunun';
-        as_.style.color = '#4CAF50';
-
-        setTimeout(() => { if (ld) ld.style.display = 'none'; }, 600);
-
-        // Algılama döngüsünü başlat
-        detectLoop();
-
-    } catch (err) {
-        console.error('AI yükleme hatası:', err);
-        if (lt) lt.innerText = 'AI yüklenemedi: ' + err.message;
-        as_.innerText = 'AI Hatası!';
-        as_.style.color = '#f44336';
-    }
+    aiWorker = new Worker('worker.js', { type: 'module' });
+    
+    aiWorker.onmessage = (e) => {
+        if (e.data.type === 'ready') {
+            if (lf) lf.style.width = '100%';
+            if (lt) lt.innerText = 'Hazır!';
+            modelReady = true;
+            as_.innerText = 'AI Hazır — Kişiye dokunun';
+            as_.style.color = '#4CAF50';
+            setTimeout(() => { if (ld) ld.style.display = 'none'; }, 600);
+            
+            // İlk çerçeveyi iste
+            requestAnimationFrame(detectFrame);
+        } else if (e.data.type === 'result') {
+            handleDetections(e.data.detections);
+            detecting = false;
+            // Hemen bir sonraki kareyi işle (Ping-Pong)
+            requestAnimationFrame(detectFrame);
+        } else if (e.data.type === 'error') {
+            console.error('AI yükleme hatası:', e.data.error);
+            if (lt) lt.innerText = 'AI yüklenemedi: ' + e.data.error;
+            as_.innerText = 'AI Hatası!';
+            as_.style.color = '#f44336';
+        }
+    };
+    
+    if (lt) lt.innerText = 'Model İndiriliyor (Arka Plan)...';
+    if (lf) lf.style.width = '60%';
+    aiWorker.postMessage({ type: 'init' });
 }
 
-// =================== ALGILAMA DÖNGÜSÜ ===================
-let detecting = false;
+// =================== ALGILAMA DÖNGÜSÜ (Worker Ping-Pong) ===================
 
-async function detectLoop() {
-    if (!isCamera || !detector || !modelReady) return;
+let lastSendTime = 0;
+
+async function detectFrame() {
+    if (!isCamera || !aiWorker || !modelReady) return;
 
     if (vid.readyState >= 4 && !detecting) {
         detecting = true;
         try {
-            // Asenkron algılama. Kamerayı DONDURMAZ!
-            const predictions = await detector.detect(vid);
+            // Çözünürlüğü düşürerek gönder ki anında işlensin (320x240 civarı optimum)
+            const targetWidth = 320;
+            const targetHeight = Math.floor(vid.videoHeight * (targetWidth / vid.videoWidth)) || 240;
+            
+            // createImageBitmap donanım desteklidir, 0 kasma yapar
+            const bitmap = await createImageBitmap(vid, { 
+                resizeWidth: targetWidth, 
+                resizeHeight: targetHeight 
+            });
+            
+            // Ölçek katsayısını kaydet (Worker'dan gelen sonuçları orijinal boyuta çevirmek için)
+            aiWorker.scaleX = vid.videoWidth / targetWidth;
+            aiWorker.scaleY = vid.videoHeight / targetHeight;
+            
+            aiWorker.postMessage({ type: 'detect', bitmap: bitmap }, [bitmap]);
+        } catch (e) {
+            console.error('Frame extraction error:', e);
+            detecting = false;
+            requestAnimationFrame(detectFrame);
+        }
+    }
+}
 
-            // Sonuçları [x, y, w, h] formatına çevir (sadece person sınıfı)
-            people = predictions
-                .filter(p => p.class === 'person' && p.score > 0.35)
-                .map(p => ({
-                    bbox: [p.bbox[0], p.bbox[1], p.bbox[2], p.bbox[3]],
-                    score: p.score
-                }));
-
-            // Kilitli hedefi güncelle
-            if (lockedBbox) {
-                updateLockedTarget();
-            }
-
-            // İzleyiciye gönder
-            if (conn && conn.open) {
-                conn.send({
-                    type: 'tracking_data',
-                    w: vid.videoWidth,
-                    h: vid.videoHeight,
-                    people: people.map(p => p.bbox),
-                    locked: lockedBbox,
-                    found: lockedBbox ? isTargetFound() : false
+function handleDetections(detections) {
+    // MediaPipe formatından bizim [x,y,w,h] formatına çevir
+    // detections array of { categories, boundingBox: {originX, originY, width, height} }
+    people = [];
+    if (detections && detections.length > 0) {
+        for (const det of detections) {
+            if (det.categories && det.categories[0] && det.categories[0].categoryName === 'person') {
+                const b = det.boundingBox;
+                people.push({
+                    bbox: [
+                        b.originX * aiWorker.scaleX, 
+                        b.originY * aiWorker.scaleY, 
+                        b.width * aiWorker.scaleX, 
+                        b.height * aiWorker.scaleY
+                    ],
+                    score: det.categories[0].score
                 });
             }
-        } catch (e) {
-            console.error('Detection error:', e);
         }
-        detecting = false;
     }
 
-    // AI kareleri arasında nefes alma süresi.
-    setTimeout(detectLoop, 15);
+    if (lockedBbox) {
+        updateLockedTarget();
+    }
+
+    // İzleyiciye gönderimi sınırla (Gereksiz ağ trafiğini engelle, 15fps yeterli)
+    const now = Date.now();
+    if (conn && conn.open && now - lastSendTime > 60) {
+        lastSendTime = now;
+        conn.send({
+            type: 'tracking_data',
+            w: vid.videoWidth,
+            h: vid.videoHeight,
+            people: people.map(p => p.bbox),
+            locked: lockedBbox,
+            found: lockedBbox ? isTargetFound() : false
+        });
+    }
 }
 
 // =================== HEDEF TAKİP ===================
@@ -363,7 +394,7 @@ function clearAlertDisplay() {
 document.getElementById('btnCam').addEventListener('click', async () => {
     isCamera = true;
     document.getElementById('role').style.display = 'none';
-    document.getElementById('main').style.display = 'flex';
+    document.getElementById('main').style.display = 'block';
     document.getElementById('cc').style.display = 'block';
     document.getElementById('lc').style.display = 'block';
 
@@ -472,7 +503,7 @@ document.getElementById('btnConn').addEventListener('click', () => {
     if (code.length !== 5) { alert('5 haneli kodu girin!'); return; }
 
     document.getElementById('vs').style.display = 'none';
-    document.getElementById('main').style.display = 'flex';
+    document.getElementById('main').style.display = 'block';
     document.getElementById('lc').style.display = 'block';
     isCamera = false;
     vid.muted = true;

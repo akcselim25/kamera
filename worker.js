@@ -7,11 +7,11 @@ async function init() {
         const resolver = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm');
         detector = await ObjectDetector.createFromOptions(resolver, {
             baseOptions: {
-                modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float16/1/efficientdet_lite2.tflite',
+                modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
                 delegate: 'GPU'
             },
             categoryAllowlist: ['person'],
-            scoreThreshold: 0.45,
+            scoreThreshold: 0.40,
             maxResults: 15,
             runningMode: 'IMAGE' // IMAGE is better for worker processing frames individually
         });
