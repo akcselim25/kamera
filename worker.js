@@ -8,7 +8,7 @@ async function init() {
         detector = await ObjectDetector.createFromOptions(resolver, {
             baseOptions: {
                 modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float16/1/efficientdet_lite0.tflite',
-                delegate: 'GPU'
+                delegate: 'CPU'
             },
             categoryAllowlist: ['person'],
             scoreThreshold: 0.40,
