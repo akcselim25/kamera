@@ -220,8 +220,15 @@ function unlockTarget() {
     lockedCenter = null;
     lockedIdx = -1;
     ub.style.display = 'none';
-    as_.innerText = modelReady ? 'Kişiye dokunun' : 'AI yükleniyor...';
-    as_.style.color = '#00bcd4';
+    
+    if (isBabyMode) {
+        as_.innerText = '👶 BEBEK İZLENİYOR';
+        as_.style.color = '#ff9a9e';
+    } else {
+        as_.innerText = modelReady ? 'Kişiye dokunun' : 'AI yükleniyor...';
+        as_.style.color = '#00bcd4';
+    }
+    
     clearAlertDisplay();
     if (conn && conn.open) conn.send({ type: 'person_in' });
 }
@@ -435,11 +442,15 @@ async function startCamera(babyMode) {
         }
 
         // Stealth (Karartma) Modu Butonu
-        document.getElementById('btnHide').onclick = () => {
+        const stealthLogic = () => {
             document.getElementById('stealth').style.display = 'flex';
             document.getElementById('stealth-pin').value = '';
-            document.getElementById('stealth-ui').style.display = 'none'; // İlk başta gizli olsun (sadece simsiyah ekran kalsın)
+            document.getElementById('stealth-ui').style.display = 'none';
         };
+        
+        document.getElementById('btnHide').onclick = stealthLogic;
+        const btnHideBaby = document.getElementById('btnHideBaby');
+        if (btnHideBaby) btnHideBaby.onclick = stealthLogic;
 
         // Hedefi Sıfırlama (Uyarı ekranından)
         document.getElementById('btnResetTarget').onclick = () => {
@@ -661,8 +672,10 @@ function handleViewerData(d) {
     else if (d.type === 'person_out') triggerAlert();
     else if (d.type === 'person_in') clearAlertDisplay();
     else if (d.type === 'mode_baby') {
-        document.getElementById('as').innerText = 'BEBEK İZLENİYOR';
-        document.getElementById('lc').style.display = 'none';
+        isBabyMode = true;
+        document.getElementById('lc').style.display = 'block';
+        document.getElementById('as').innerText = '👶 BEBEK İZLENİYOR';
+        document.getElementById('as').style.color = '#ff9a9e';
         document.getElementById('btnToggleUI').style.display = 'block';
     }
     else if (d.type === 'baby_alert') {
