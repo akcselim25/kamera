@@ -7,6 +7,8 @@
     <meta name="theme-color" content="#111">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3254/3254556.png">
     <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700;900&display=swap');
@@ -177,6 +179,17 @@
     </div>
 </div>
 
-<script type="module" src="app.js?v=36"></script>
+<script type="module" src="app.js?v=37"></script>
+<script>
+    if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('./sw.js').then(reg => {
+                console.log('Service Worker registered', reg);
+            }).catch(err => {
+                console.log('Service Worker registration failed', err);
+            });
+        });
+    }
+</script>
 </body>
 </html>

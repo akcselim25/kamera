@@ -1,0 +1,17 @@
+{
+    "name": "Kamera Takip AI",
+    "short_name": "KameraTakip",
+    "description": "Yapay zeka destekli otonom izleme ve bebek takip sistemi",
+    "start_url": "./index.html",
+    "display": "standalone",
+    "background_color": "#0b0c10",
+    "theme_color": "#111111",
+    "orientation": "portrait",
+    "icons": [
+        {
+            "src": "https://cdn-icons-png.flaticon.com/512/3254/3254556.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}
