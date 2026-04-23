@@ -60,6 +60,12 @@ async function loadAI() {
             
             // İlk çerçeveyi iste
             requestAnimationFrame(detectFrame);
+        } else if (e.data.type === 'progress') {
+            if (lt) lt.innerText = e.data.message;
+            if (lf) {
+                let currentW = parseInt(lf.style.width) || 30;
+                if(currentW < 90) lf.style.width = (currentW + 10) + '%';
+            }
         } else if (e.data.type === 'result') {
             handleDetections(e.data.detections);
             detecting = false;
@@ -73,8 +79,8 @@ async function loadAI() {
         }
     };
     
-    if (lt) lt.innerText = 'Model İndiriliyor (Arka Plan)...';
-    if (lf) lf.style.width = '60%';
+    if (lt) lt.innerText = 'Sistem Hazırlanıyor...';
+    if (lf) lf.style.width = '30%';
     aiWorker.postMessage({ type: 'init' });
 }
 
