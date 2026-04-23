@@ -19,6 +19,7 @@ const ub = document.getElementById('ub');
 
 let peer = null, conn = null, call = null;
 let isCamera = false;
+let isBabyMode = false;
 let aiWorker = null;
 let modelReady = false;
 let detecting = false;
@@ -83,7 +84,7 @@ async function loadAI() {
 let lastSendTime = 0;
 
 async function detectFrame() {
-    if (!isCamera || !aiWorker || !modelReady) return;
+    if (!isCamera || isBabyMode || !aiWorker || !modelReady) return;
 
     if (vid.readyState >= 4 && !detecting) {
         detecting = true;
@@ -236,7 +237,7 @@ function drawLoop() {
 
         ctx.clearRect(0, 0, cvs.width, cvs.height);
 
-        if (isCamera) {
+        if (isCamera && !isBabyMode) {
             if (lockedBbox) {
                 if (!smoothBbox) smoothBbox = [...lockedBbox];
                 else {
@@ -337,6 +338,8 @@ function drawLoop() {
 // =================== TIKKLAMA ===================
 
 cvs.addEventListener('click', (e) => {
+    if (isBabyMode) return;
+    
     const rect = cvs.getBoundingClientRect();
     
     // object-fit: cover için matematiksel olarak doğru tıklama hesaplaması
@@ -400,24 +403,36 @@ function clearAlertDisplay() {
     clearInterval(vibInt);
 }
 
-// =================== KAMERA MODU ===================
+document.getElementById('btnCam').addEventListener('click', () => startCamera(false));
+document.getElementById('btnBaby').addEventListener('click', () => startCamera(true));
 
-document.getElementById('btnCam').addEventListener('click', async () => {
+async function startCamera(babyMode) {
     isCamera = true;
+    isBabyMode = babyMode;
     document.getElementById('role').style.display = 'none';
     document.getElementById('main').style.display = 'block';
-    document.getElementById('cc').style.display = 'block';
-    document.getElementById('lc').style.display = 'block';
+
+    if (babyMode) {
+        document.getElementById('baby-controls').style.display = 'block';
+    } else {
+        document.getElementById('cc').style.display = 'block';
+        document.getElementById('lc').style.display = 'block';
+    }
 
     // 1. Kamerayı HEMEN aç
     let stream;
     try {
         stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
-            audio: false
+            audio: babyMode
         });
         vid.srcObject = stream;
         vid.muted = true;
+        
+        if (babyMode) {
+            startAudioMonitoring(stream);
+            startMotionMonitoring();
+        }
 
         // Stealth (Karartma) Modu Butonu
         document.getElementById('btnHide').onclick = () => {
@@ -428,9 +443,12 @@ document.getElementById('btnCam').addEventListener('click', async () => {
 
         // Hedefi Sıfırlama (Uyarı ekranından)
         document.getElementById('btnResetTarget').onclick = () => {
+            document.getElementById('alert').style.display = 'none';
             unlockTarget();
             if (conn && conn.open) conn.send({ type: 'viewer_unlock' });
         };
+        
+        document.getElementById('btnBackBaby').onclick = () => location.reload();
 
         // Simsiyah ekrana tıklayınca şifre sorma alanını aç
         document.getElementById('stealth').onclick = (e) => {
@@ -505,14 +523,18 @@ document.getElementById('btnCam').addEventListener('click', async () => {
     }
 
     // 2. PeerJS'i HEMEN başlat (Arka planda hazırlandıysa onu kullan)
-    document.getElementById('mc').innerText = precode;
+    if (babyMode) {
+        document.getElementById('mc-baby').innerText = precode;
+    } else {
+        document.getElementById('mc').innerText = precode;
+    }
     peer = prepeer;
 
     const setupHost = () => {
         cs.innerText = 'Hazır — İzleyici bekleniyor';
         cp.className = 'p g';
         drawLoop();
-        loadAI();
+        if (!babyMode) loadAI();
     };
 
     if (peer.open) {
@@ -525,6 +547,7 @@ document.getElementById('btnCam').addEventListener('click', async () => {
     peer.on('connection', (c) => {
         conn = c;
         cs.innerText = 'İzleyici bağlandı!';
+        if (babyMode) conn.send({ type: 'mode_baby' });
         c.on('data', (d) => {
             if (d.type === 'viewer_ready') peer.call(c.peer, stream);
             else if (d.type === 'viewer_click') {
@@ -550,7 +573,7 @@ document.getElementById('btnCam').addEventListener('click', async () => {
     });
 
     peer.on('error', (e) => console.error('Peer:', e));
-});
+}
 
 // =================== İZLEYİCİ MODU ===================
 
@@ -637,6 +660,27 @@ function handleViewerData(d) {
     if (d.type === 'tracking_data') vData = d;
     else if (d.type === 'person_out') triggerAlert();
     else if (d.type === 'person_in') clearAlertDisplay();
+    else if (d.type === 'mode_baby') {
+        document.getElementById('as').innerText = 'BEBEK İZLENİYOR';
+        document.getElementById('lc').style.display = 'none';
+        document.getElementById('btnToggleUI').style.display = 'block';
+    }
+    else if (d.type === 'baby_alert') {
+        const al = document.getElementById('alert');
+        const icon = document.getElementById('alert-icon');
+        const title = document.getElementById('alert-title');
+        const msg = document.getElementById('alert-msg');
+        const btn = document.getElementById('btnResetTarget');
+        
+        if (d.alert === 'sound_start' || d.alert === 'motion_start') {
+            icon.innerText = d.alert === 'sound_start' ? '👶🔊' : '👶🚼';
+            title.innerText = 'BEBEK UYARISI';
+            msg.innerText = d.alert === 'sound_start' ? 'BEBEK SES ÇIKARIYOR / AĞLIYOR!' : 'BEBEK HAREKET ETTİ!';
+            btn.innerText = 'TAMAM (SUSTUR)';
+            al.style.display = 'flex';
+            if (navigator.vibrate) navigator.vibrate([500, 200, 500]);
+        }
+    }
     else if (d.type === 'set_filter') {
         vid.className = 'filter-' + d.filter;
         cvs.className = 'filter-' + d.filter;
@@ -704,3 +748,80 @@ let prepeer = new Peer('phtrck-' + precode, { debug: 0 });
 
 // Global exports for onclick handlers
 window.unlockTarget = unlockTarget;
+
+// =================== BEBEK İZLEME ===================
+
+let babyAudioAlert = false;
+let babyMotionAlert = false;
+
+function startAudioMonitoring(stream) {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 256;
+    source.connect(analyser);
+    const dataArray = new Uint8Array(analyser.frequencyBinCount);
+    let highVolumeFrames = 0;
+    
+    function monitor() {
+        if (!isBabyMode) return;
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0; 
+        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+        let avg = sum / dataArray.length;
+        
+        if (avg > 40) highVolumeFrames++;
+        else {
+            highVolumeFrames = 0;
+            if (babyAudioAlert) {
+                babyAudioAlert = false;
+                document.getElementById('baby-sound').innerText = 'Ses: 🟢';
+                document.getElementById('baby-sound').style.background = 'rgba(0,0,0,0.5)';
+            }
+        }
+        
+        if (highVolumeFrames > 30 && !babyAudioAlert) { 
+            babyAudioAlert = true;
+            document.getElementById('baby-sound').innerText = 'Ses: 🔴 AĞLIYOR!';
+            document.getElementById('baby-sound').style.background = 'rgba(255,0,0,0.5)';
+            if (conn && conn.open) conn.send({ type: 'baby_alert', alert: 'sound_start' });
+        }
+        requestAnimationFrame(monitor);
+    }
+    monitor();
+}
+
+function startMotionMonitoring() {
+    const motionCanvas = document.createElement('canvas');
+    const motionCtx = motionCanvas.getContext('2d', { willReadFrequently: true });
+    let prevFrame = null;
+    
+    setInterval(() => {
+        if (!isBabyMode || !vid.videoWidth) return;
+        motionCanvas.width = 64; motionCanvas.height = 48;
+        motionCtx.drawImage(vid, 0, 0, 64, 48);
+        const currentFrame = motionCtx.getImageData(0, 0, 64, 48).data;
+        
+        if (prevFrame) {
+            let diff = 0;
+            for (let i = 0; i < currentFrame.length; i += 4) {
+                diff += Math.abs(currentFrame[i] - prevFrame[i]);
+                diff += Math.abs(currentFrame[i+1] - prevFrame[i+1]);
+                diff += Math.abs(currentFrame[i+2] - prevFrame[i+2]);
+            }
+            if (diff / (64 * 48 * 3) > 12 && !babyMotionAlert) { 
+                babyMotionAlert = true;
+                document.getElementById('baby-motion').innerText = 'Hareket: 🔴 HAREKET!';
+                document.getElementById('baby-motion').style.background = 'rgba(255,0,0,0.5)';
+                if (conn && conn.open) conn.send({ type: 'baby_alert', alert: 'motion_start' });
+                
+                setTimeout(() => {
+                    babyMotionAlert = false;
+                    document.getElementById('baby-motion').innerText = 'Hareket: 🟢';
+                    document.getElementById('baby-motion').style.background = 'rgba(0,0,0,0.5)';
+                }, 4000);
+            }
+        }
+        prevFrame = currentFrame;
+    }, 500); 
+}
