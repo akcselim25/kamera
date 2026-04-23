@@ -444,12 +444,12 @@ async function startCamera(babyMode) {
                 });
                 alert("Mikrofon izni reddedildi! Bebek kamerasında 'Ses Algılama' devre dışı kalacak, sadece hareket algılama çalışacak.");
             } catch (fallbackErr) {
-                alert('Kamera açılamadı: ' + fallbackErr.name);
+                alert('Kamera açılamadı: ' + fallbackErr.name + '\nDetay: ' + fallbackErr.message);
                 location.reload();
                 return;
             }
         } else {
-            alert('Kamera açılamadı: ' + e.name);
+            alert('Kamera açılamadı: ' + e.name + '\nDetay: ' + e.message);
             location.reload();
             return;
         }
