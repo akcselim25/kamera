@@ -338,10 +338,16 @@ function drawLoop() {
 
 cvs.addEventListener('click', (e) => {
     const rect = cvs.getBoundingClientRect();
-    const sx = cvs.width / rect.width;
-    const sy = cvs.height / rect.height;
-    const cx = (e.clientX - rect.left) * sx;
-    const cy = (e.clientY - rect.top) * sy;
+    
+    // object-fit: cover için matematiksel olarak doğru tıklama hesaplaması
+    const scale = Math.max(rect.width / cvs.width, rect.height / cvs.height);
+    const renderedWidth = cvs.width * scale;
+    const renderedHeight = cvs.height * scale;
+    const offsetX = (rect.width - renderedWidth) / 2;
+    const offsetY = (rect.height - renderedHeight) / 2;
+
+    const cx = (e.clientX - rect.left - offsetX) / scale;
+    const cy = (e.clientY - rect.top - offsetY) / scale;
 
     if (!isCamera) {
         if (conn && conn.open) conn.send({ type: 'viewer_click', x: cx, y: cy, w: cvs.width, h: cvs.height });
@@ -470,6 +476,22 @@ document.getElementById('btnCam').addEventListener('click', async () => {
             }
         };
 
+        // UI Gizle/Göster Butonu
+        document.getElementById('btnToggleUI').style.display = 'block';
+        let uiHidden = false;
+        document.getElementById('btnToggleUI').onclick = () => {
+            uiHidden = !uiHidden;
+            const wrapper = document.getElementById('controls-wrapper');
+            const btn = document.getElementById('btnToggleUI');
+            if(uiHidden) {
+                wrapper.style.transform = 'translateY(calc(100% + 40px))';
+                btn.innerText = '▲ GÖSTER';
+            } else {
+                wrapper.style.transform = 'translateY(0)';
+                btn.innerText = '▼ GİZLE';
+            }
+        };
+
     } catch (e) {
         alert('Kamera açılamadı!');
         location.reload();
@@ -553,6 +575,23 @@ document.getElementById('btnConn').addEventListener('click', () => {
         conn.on('open', () => {
             cs.innerText = 'Bağlandı!';
             cp.className = 'p g';
+            document.getElementById('btnToggleUI').style.display = 'block';
+            
+            // İzleyici için de UI Gizle/Göster
+            let uiHidden = false;
+            document.getElementById('btnToggleUI').onclick = () => {
+                uiHidden = !uiHidden;
+                const wrapper = document.getElementById('controls-wrapper');
+                const btn = document.getElementById('btnToggleUI');
+                if(uiHidden) {
+                    wrapper.style.transform = 'translateY(calc(100% + 40px))';
+                    btn.innerText = '▲ GÖSTER';
+                } else {
+                    wrapper.style.transform = 'translateY(0)';
+                    btn.innerText = '▼ GİZLE';
+                }
+            };
+            
             conn.send({ type: 'viewer_ready' });
             viewerDraw();
         });

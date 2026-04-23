@@ -49,7 +49,7 @@
         /* Main Camera UI */
         #main { display:none; height:100vh; width:100vw; position:relative; background:#000; }
         .vc { position:absolute; top:0; left:0; width:100%; height:100%; z-index:1; }
-        video, canvas { width:100%; height:100%; object-fit:cover; display:block; }
+        video, canvas { position:absolute; top:0; left:0; width:100%; height:100%; object-fit:cover; display:block; }
         
         /* HUD Elements */
         #hud { position:absolute; top:0; left:0; width:100%; height:100%; z-index:20; pointer-events:none; display:flex; flex-direction:column; justify-content:space-between; padding:20px; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
@@ -127,8 +127,10 @@
             <div id="as">Yükleniyor...</div>
         </div>
         
-        <div id="controls-container">
-            <div id="cc" class="ctrl" style="display:none">
+        <div id="controls-wrapper" style="position:relative; transition: transform 0.4s cubic-bezier(0.4,0,0.2,1); width:100%; max-width:400px; margin:0 auto; pointer-events:none;">
+            <button id="btnToggleUI" style="position:absolute; top:-40px; left:50%; transform:translateX(-50%); background:var(--glass); border:1px solid rgba(255,255,255,0.1); border-radius:20px; padding:8px 24px; color:#fff; font-weight:bold; cursor:pointer; z-index:50; backdrop-filter:blur(10px); box-shadow:0 -5px 15px rgba(0,0,0,0.3); pointer-events:auto; display:none;">▼ GİZLE</button>
+            <div id="controls-container">
+                <div id="cc" class="ctrl" style="display:none">
                 <div class="ibox">
                     <p style="font-size:12px;color:rgba(255,255,255,0.5);letter-spacing:2px;text-transform:uppercase;font-weight:700;">BAĞLANTI KODU</p>
                     <div class="code" id="mc">....</div>
@@ -154,6 +156,6 @@
     </div>
 </div>
 
-<script type="module" src="app.js?v=31"></script>
+<script type="module" src="app.js?v=32"></script>
 </body>
 </html>
