@@ -428,110 +428,128 @@ async function startCamera(babyMode) {
 
     // 1. Kamerayı HEMEN aç
     let stream;
+    let audioEnabled = false;
     try {
         stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
             audio: babyMode
         });
-        vid.srcObject = stream;
-        vid.muted = true;
-        
-        if (babyMode) {
-            startAudioMonitoring(stream);
-            startMotionMonitoring();
-        }
-
-        // Stealth (Karartma) Modu Butonu
-        const stealthLogic = () => {
-            document.getElementById('stealth').style.display = 'flex';
-            document.getElementById('stealth-pin').value = '';
-            document.getElementById('stealth-ui').style.display = 'none';
-        };
-        
-        document.getElementById('btnHide').onclick = stealthLogic;
-        const btnHideBaby = document.getElementById('btnHideBaby');
-        if (btnHideBaby) btnHideBaby.onclick = stealthLogic;
-
-        // Hedefi Sıfırlama (Uyarı ekranından)
-        document.getElementById('btnResetTarget').onclick = () => {
-            document.getElementById('alert').style.display = 'none';
-            unlockTarget();
-            if (conn && conn.open) conn.send({ type: 'viewer_unlock' });
-        };
-        
-        document.getElementById('btnBackBaby').onclick = () => location.reload();
-
-        // Simsiyah ekrana tıklayınca şifre sorma alanını aç
-        document.getElementById('stealth').onclick = (e) => {
-            if(e.target.id === 'stealth') {
-                document.getElementById('stealth-ui').style.display = 'flex';
-                document.getElementById('stealth-pin').focus();
-            }
-        };
-
-        // Şifre kontrol tuşu
-        document.getElementById('stealth-unlock').onclick = () => {
-            if (document.getElementById('stealth-pin').value === '7693') {
-                document.getElementById('stealth').style.display = 'none'; // Moddan çık
-                document.getElementById('stealth-ui').style.display = 'none';
-            } else {
-                alert('Yanlış Şifre!');
-                document.getElementById('stealth-pin').value = '';
-                document.getElementById('stealth-ui').style.display = 'none'; // Yanlışsa tekrar kapansın tamamen
-            }
-        };
-
-        // Yeni Butonlar: Termal, Gece, Hafıza
-        const setFilter = (filterName) => {
-            currentFilter = filterName;
-            vid.className = 'filter-' + filterName;
-            cvs.className = 'filter-' + filterName;
-            if (conn && conn.open) {
-                conn.send({ type: 'set_filter', filter: filterName });
-            }
-        };
-
-        document.getElementById('btnThermal').onclick = () => {
-            setFilter(currentFilter === 'thermal' ? 'none' : 'thermal');
-        };
-
-        document.getElementById('btnNight').onclick = () => {
-            setFilter(currentFilter === 'night' ? 'none' : 'night');
-        };
-
-        document.getElementById('btnMemory').onclick = () => {
-            memoryMode = !memoryMode;
-            const btn = document.getElementById('btnMemory');
-            if (memoryMode) {
-                btn.innerText = '🧠 Hafıza Açık';
-                btn.style.background = 'rgba(100,100,255,0.6)';
-            } else {
-                btn.innerText = '🧠 Hafıza Kapalı';
-                btn.style.background = 'rgba(100,100,255,0.2)';
-            }
-        };
-
-        // UI Gizle/Göster Butonu
-        document.getElementById('btnToggleUI').style.display = 'block';
-        let uiHidden = false;
-        document.getElementById('btnToggleUI').onclick = () => {
-            uiHidden = !uiHidden;
-            const wrapper = document.getElementById('controls-wrapper');
-            const btn = document.getElementById('btnToggleUI');
-            if(uiHidden) {
-                wrapper.style.transform = 'translateY(calc(100% + 40px))';
-                btn.innerText = '▲ GÖSTER';
-            } else {
-                wrapper.style.transform = 'translateY(0)';
-                btn.innerText = '▼ GİZLE';
-            }
-        };
-
+        audioEnabled = babyMode;
     } catch (e) {
-        alert('Kamera açılamadı!');
-        location.reload();
-        return;
+        if (babyMode) {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } },
+                    audio: false
+                });
+                alert("Mikrofon izni reddedildi! Bebek kamerasında 'Ses Algılama' devre dışı kalacak, sadece hareket algılama çalışacak.");
+            } catch (fallbackErr) {
+                alert('Kamera açılamadı: ' + fallbackErr.name);
+                location.reload();
+                return;
+            }
+        } else {
+            alert('Kamera açılamadı: ' + e.name);
+            location.reload();
+            return;
+        }
     }
+
+    vid.srcObject = stream;
+    vid.muted = true;
+    
+    if (babyMode) {
+        if (audioEnabled) startAudioMonitoring(stream);
+        else document.getElementById('baby-sound').innerText = 'Ses: KAPALI';
+        
+        startMotionMonitoring();
+    }
+
+    // Stealth (Karartma) Modu Butonu
+    const stealthLogic = () => {
+        document.getElementById('stealth').style.display = 'flex';
+        document.getElementById('stealth-pin').value = '';
+        document.getElementById('stealth-ui').style.display = 'none';
+    };
+    
+    document.getElementById('btnHide').onclick = stealthLogic;
+    const btnHideBaby = document.getElementById('btnHideBaby');
+    if (btnHideBaby) btnHideBaby.onclick = stealthLogic;
+
+    // Hedefi Sıfırlama (Uyarı ekranından)
+    document.getElementById('btnResetTarget').onclick = () => {
+        document.getElementById('alert').style.display = 'none';
+        unlockTarget();
+        if (conn && conn.open) conn.send({ type: 'viewer_unlock' });
+    };
+    
+    document.getElementById('btnBackBaby').onclick = () => location.reload();
+
+    // Simsiyah ekrana tıklayınca şifre sorma alanını aç
+    document.getElementById('stealth').onclick = (e) => {
+        if(e.target.id === 'stealth') {
+            document.getElementById('stealth-ui').style.display = 'flex';
+            document.getElementById('stealth-pin').focus();
+        }
+    };
+
+    // Şifre kontrol tuşu
+    document.getElementById('stealth-unlock').onclick = () => {
+        if (document.getElementById('stealth-pin').value === '7693') {
+            document.getElementById('stealth').style.display = 'none'; // Moddan çık
+            document.getElementById('stealth-ui').style.display = 'none';
+        } else {
+            alert('Yanlış Şifre!');
+            document.getElementById('stealth-pin').value = '';
+            document.getElementById('stealth-ui').style.display = 'none'; // Yanlışsa tekrar kapansın tamamen
+        }
+    };
+
+    // Yeni Butonlar: Termal, Gece, Hafıza
+    const setFilter = (filterName) => {
+        currentFilter = filterName;
+        vid.className = 'filter-' + filterName;
+        cvs.className = 'filter-' + filterName;
+        if (conn && conn.open) {
+            conn.send({ type: 'set_filter', filter: filterName });
+        }
+    };
+
+    document.getElementById('btnThermal').onclick = () => {
+        setFilter(currentFilter === 'thermal' ? 'none' : 'thermal');
+    };
+
+    document.getElementById('btnNight').onclick = () => {
+        setFilter(currentFilter === 'night' ? 'none' : 'night');
+    };
+
+    document.getElementById('btnMemory').onclick = () => {
+        memoryMode = !memoryMode;
+        const btn = document.getElementById('btnMemory');
+        if (memoryMode) {
+            btn.innerText = '🧠 Hafıza Açık';
+            btn.style.background = 'rgba(100,100,255,0.6)';
+        } else {
+            btn.innerText = '🧠 Hafıza Kapalı';
+            btn.style.background = 'rgba(100,100,255,0.2)';
+        }
+    };
+
+    // UI Gizle/Göster Butonu
+    document.getElementById('btnToggleUI').style.display = 'block';
+    let uiHidden = false;
+    document.getElementById('btnToggleUI').onclick = () => {
+        uiHidden = !uiHidden;
+        const wrapper = document.getElementById('controls-wrapper');
+        const btn = document.getElementById('btnToggleUI');
+        if(uiHidden) {
+            wrapper.style.transform = 'translateY(calc(100% + 40px))';
+            btn.innerText = '▲ GÖSTER';
+        } else {
+            wrapper.style.transform = 'translateY(0)';
+            btn.innerText = '▼ GİZLE';
+        }
+    };
 
     // 2. PeerJS'i HEMEN başlat (Arka planda hazırlandıysa onu kullan)
     if (babyMode) {
