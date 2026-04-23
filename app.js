@@ -60,12 +60,6 @@ async function loadAI() {
             
             // İlk çerçeveyi iste
             requestAnimationFrame(detectFrame);
-        } else if (e.data.type === 'progress') {
-            if (lt) lt.innerText = e.data.message;
-            if (lf) {
-                let currentW = parseInt(lf.style.width) || 30;
-                if(currentW < 90) lf.style.width = (currentW + 10) + '%';
-            }
         } else if (e.data.type === 'result') {
             handleDetections(e.data.detections);
             detecting = false;
@@ -79,8 +73,8 @@ async function loadAI() {
         }
     };
     
-    if (lt) lt.innerText = 'Sistem Hazırlanıyor...';
-    if (lf) lf.style.width = '30%';
+    if (lt) lt.innerText = 'Model İndiriliyor (Arka Plan)...';
+    if (lf) lf.style.width = '60%';
     aiWorker.postMessage({ type: 'init' });
 }
 
@@ -430,6 +424,12 @@ document.getElementById('btnCam').addEventListener('click', async () => {
             document.getElementById('stealth').style.display = 'flex';
             document.getElementById('stealth-pin').value = '';
             document.getElementById('stealth-ui').style.display = 'none'; // İlk başta gizli olsun (sadece simsiyah ekran kalsın)
+        };
+
+        // Hedefi Sıfırlama (Uyarı ekranından)
+        document.getElementById('btnResetTarget').onclick = () => {
+            unlockTarget();
+            if (conn && conn.open) conn.send({ type: 'viewer_unlock' });
         };
 
         // Simsiyah ekrana tıklayınca şifre sorma alanını aç
