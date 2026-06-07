@@ -66,9 +66,9 @@ async function loadAI() {
             detecting = false;
             // Hemen bir sonraki kareyi işle (Ping-Pong)
             if (isBabyMode) {
-                setTimeout(() => { requestAnimationFrame(detectFrame); }, 1000); // 1 FPS in baby mode to save CPU
+                setTimeout(() => { requestAnimationFrame(detectFrame); }, 300); // 3.3 FPS in baby mode (faster reaction)
             } else {
-                requestAnimationFrame(detectFrame);
+                setTimeout(() => { requestAnimationFrame(detectFrame); }, 50); // Throttle normal mode to ~20 FPS to prevent CPU overheating
             }
         } else if (e.data.type === 'error') {
             console.error('AI yükleme hatası:', e.data.error);
@@ -93,19 +93,12 @@ async function detectFrame() {
     if (vid.readyState >= 4 && !detecting) {
         detecting = true;
         try {
-            // Çözünürlüğü düşürerek gönder ki anında işlensin (320x240 civarı optimum)
-            const targetWidth = 320;
-            const targetHeight = Math.floor(vid.videoHeight * (targetWidth / vid.videoWidth)) || 240;
+            // createImageBitmap donanım desteklidir, 0 kasma yapar (Boyut küçültmeyi MediaPipe kendi içinde donanımsal yapacaktır)
+            const bitmap = await createImageBitmap(vid);
             
-            // createImageBitmap donanım desteklidir, 0 kasma yapar
-            const bitmap = await createImageBitmap(vid, { 
-                resizeWidth: targetWidth, 
-                resizeHeight: targetHeight 
-            });
-            
-            // Ölçek katsayısını kaydet (Worker'dan gelen sonuçları orijinal boyuta çevirmek için)
-            aiWorker.scaleX = vid.videoWidth / targetWidth;
-            aiWorker.scaleY = vid.videoHeight / targetHeight;
+            // Boyut küçültmeyi devre dışı bıraktığımız için ölçeği bire bir yapıyoruz
+            aiWorker.scaleX = 1;
+            aiWorker.scaleY = 1;
             
             aiWorker.postMessage({ type: 'detect', bitmap: bitmap }, [bitmap]);
         } catch (e) {
@@ -887,7 +880,7 @@ function startAudioMonitoring(stream) {
         setTimeout(monitor, 100);
     }
     
-    setTimeout(monitor, 1000);
+    setTimeout(monitor, 200);
 }
 
 
