@@ -48,7 +48,7 @@ async function loadAI() {
     if (lt) lt.innerText = 'AI İş Parçacığı Başlatılıyor...';
     if (lf) lf.style.width = '30%';
 
-    aiWorker = new Worker('worker.js?v=31');
+    aiWorker = new Worker('worker.js?v=32');
     
     aiWorker.onmessage = (e) => {
         if (e.data.type === 'ready') {
@@ -191,8 +191,8 @@ function updateLockedTarget() {
             score += 15;
         }
 
-        // Tolerans kontrolü: Belirli bir örtüşme varsa VEYA mesafe genişleyen eşiğin altındaysa
-        const isWithinTolerance = iou > 0.10 || distRatio < searchTolerance;
+        // Tolerans kontrolü: Belirli bir örtüşme varsa, mesafe genişleyen eşiğin altındaysa VEYA hafıza modu açıkken kadrajda tek kişi varsa
+        const isWithinTolerance = iou > 0.10 || distRatio < searchTolerance || (memoryMode && people.length === 1);
         
         if (isWithinTolerance && score > bestScore) {
             bestScore = score;
