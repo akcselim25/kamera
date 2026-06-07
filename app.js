@@ -173,6 +173,12 @@ function updateLockedTarget() {
 
     let bestMatch = null;
     let bestScore = -Infinity;
+    
+    const elapsed = Date.now() - lastFoundTime;
+    
+    // Geçen süreye göre arama toleransını kademeli olarak genişlet (Mesafe eşiği toleransı)
+    // Hafıza modu açıksa toleransı geniş tutarak hedefin kaybolup geri gelmesinde yakalama şansını artırır
+    const searchTolerance = memoryMode ? 2.5 : Math.min(2.5, 0.8 + (elapsed / 1000) * 0.4);
 
     for (const p of people) {
         const iou = getIoU(lockedBbox, p.bbox);
@@ -184,17 +190,25 @@ function updateLockedTarget() {
         const sizeRatio = Math.min(w * h, lockedBbox[2] * lockedBbox[3]) /
                           Math.max(w * h, lockedBbox[2] * lockedBbox[3]);
 
-        // Daha katı bir takip algoritması (Mesafe değişimini ağır cezalandırır)
-        const score = (iou * 10) + (sizeRatio * 5) - (distRatio * 15);
+        // Skorlama: IoU yüksek olması önceliklidir, mesafe cezalandırılır (tolerans dahilinde esnek tutuldu)
+        let score = (iou * 12) + (sizeRatio * 4) - (distRatio * 8);
 
-        // Bir başkasına sıçramaması için kuralları katılaştırdık
-        if ((iou > 0.15 || (distRatio < 0.8 && sizeRatio > 0.5)) && score > bestScore) {
+        // Hafıza modu aktifken kadrajda tek kişi kaldıysa kilitlenme olasılığını artır
+        if (memoryMode && people.length === 1) {
+            score += 15;
+        }
+
+        // Tolerans kontrolü: Belirli bir örtüşme varsa VEYA mesafe genişleyen eşiğin altındaysa
+        const isWithinTolerance = iou > 0.10 || distRatio < searchTolerance;
+        
+        if (isWithinTolerance && score > bestScore) {
             bestScore = score;
             bestMatch = p;
         }
     }
 
-    if (bestMatch && bestScore > -0.5) {
+    // Eşleşme bulunduysa ve geçerli bir skor ise konumu güncelle
+    if (bestMatch && (bestScore > -10 || (memoryMode && people.length === 1))) {
         const [x, y, w, h] = bestMatch.bbox;
         lockedBbox = [x, y, w, h];
         lockedCenter = { x: x + w / 2, y: y + h / 2 };

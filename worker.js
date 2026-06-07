@@ -59,7 +59,7 @@ async function init() {
                 delegate: 'CPU'
             },
             categoryAllowlist: ['person'],
-            scoreThreshold: 0.40,
+            scoreThreshold: 0.30,
             maxResults: 15,
             runningMode: 'IMAGE'
         });
