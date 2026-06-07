@@ -65,7 +65,11 @@ async function loadAI() {
             handleDetections(e.data.detections);
             detecting = false;
             // Hemen bir sonraki kareyi işle (Ping-Pong)
-            requestAnimationFrame(detectFrame);
+            if (isBabyMode) {
+                setTimeout(() => { requestAnimationFrame(detectFrame); }, 1000); // 1 FPS in baby mode to save CPU
+            } else {
+                requestAnimationFrame(detectFrame);
+            }
         } else if (e.data.type === 'error') {
             console.error('AI yükleme hatası:', e.data.error);
             if (lt) lt.innerText = 'AI yüklenemedi: ' + e.data.error;
@@ -84,7 +88,7 @@ async function loadAI() {
 let lastSendTime = 0;
 
 async function detectFrame() {
-    if (!isCamera || isBabyMode || !aiWorker || !modelReady) return;
+    if (!isCamera || !aiWorker || !modelReady) return;
 
     if (vid.readyState >= 4 && !detecting) {
         detecting = true;
@@ -563,7 +567,7 @@ async function startCamera(babyMode) {
         cs.innerText = 'Hazır — İzleyici bekleniyor';
         cp.className = 'p g';
         drawLoop();
-        if (!babyMode) loadAI();
+        loadAI();
     };
 
     if (peer.open) {
@@ -789,38 +793,89 @@ function startAudioMonitoring(stream) {
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     const source = audioContext.createMediaStreamSource(stream);
     const analyser = audioContext.createAnalyser();
-    analyser.fftSize = 256;
+    analyser.fftSize = 1024;
     source.connect(analyser);
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
-    let highVolumeFrames = 0;
+    
+    const binWidth = audioContext.sampleRate / analyser.fftSize;
+    
+    // Frekans aralıklarının bin indekslerini hesapla
+    const lowStart = Math.max(0, Math.round(50 / binWidth));
+    const lowEnd = Math.round(250 / binWidth);
+    
+    const babyStart = Math.round(350 / binWidth);
+    const babyEnd = Math.round(600 / binWidth);
+    
+    const harmonicStart = Math.round(800 / binWidth);
+    const harmonicEnd = Math.round(2000 / binWidth);
+    
+    const noiseStart = Math.round(3000 / binWidth);
+    const noiseEnd = Math.min(dataArray.length - 1, Math.round(8000 / binWidth));
+    
+    let cryMatchBuffer = []; // Zamansal filtreleme için son N kontrolün durumunu tutar
+    const BUFFER_SIZE = 15;  // Yaklaşık 1.5 saniye (her 100ms'de bir kontrol için)
     
     function monitor() {
-        if (!isBabyMode) return;
+        if (!isBabyMode) {
+            audioContext.close();
+            return;
+        }
         analyser.getByteFrequencyData(dataArray);
-        let sum = 0; 
-        for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-        let avg = sum / dataArray.length;
         
-        if (avg > 40) highVolumeFrames++;
-        else {
-            highVolumeFrames = 0;
-            if (babyAudioAlert) {
+        let lowSum = 0, lowCount = 0;
+        for (let i = lowStart; i <= lowEnd; i++) { lowSum += dataArray[i]; lowCount++; }
+        const lowAvg = lowCount > 0 ? lowSum / lowCount : 0;
+        
+        let babySum = 0, babyCount = 0;
+        for (let i = babyStart; i <= babyEnd; i++) { babySum += dataArray[i]; babyCount++; }
+        const babyAvg = babyCount > 0 ? babySum / babyCount : 0;
+        
+        let harmonicSum = 0, harmonicCount = 0;
+        for (let i = harmonicStart; i <= harmonicEnd; i++) { harmonicSum += dataArray[i]; harmonicCount++; }
+        const harmonicAvg = harmonicCount > 0 ? harmonicSum / harmonicCount : 0;
+        
+        let noiseSum = 0, noiseCount = 0;
+        for (let i = noiseStart; i <= noiseEnd; i++) { noiseSum += dataArray[i]; noiseCount++; }
+        const noiseAvg = noiseCount > 0 ? noiseSum / noiseCount : 0;
+        
+        // Bebek Ağlama İmzası Kriterleri:
+        // 1. Ağlama temel frekansında (350Hz-600Hz) minimum enerji (sessiz ortamda tetiklenmemesi için)
+        // 2. Ağlama bandı pes gürültülerden/kalın konuşmalardan belirgin şekilde güçlü olmalı
+        // 3. Ağlama bandı tiz parazit/hışırtı seslerinden güçlü olmalı
+        // 4. Harmoniklerde (tiz bebek tonlarında) belirli bir enerji olmalı
+        const isCryFrequencyPattern = (babyAvg > 35) && (babyAvg > lowAvg * 1.35) && (babyAvg > noiseAvg * 1.3) && (harmonicAvg > 15);
+        
+        cryMatchBuffer.push(isCryFrequencyPattern);
+        if (cryMatchBuffer.length > BUFFER_SIZE) {
+            cryMatchBuffer.shift();
+        }
+        
+        const cryMatches = cryMatchBuffer.filter(Boolean).length;
+        const cryRatio = cryMatches / BUFFER_SIZE;
+        
+        // Son 1.5 saniyenin en az %60'ında ağlama imzası görüldüyse alarmı tetikle
+        if (cryMatchBuffer.length >= 10 && cryRatio > 0.6) {
+            if (!babyAudioAlert) {
+                babyAudioAlert = true;
+                document.getElementById('baby-sound').innerText = 'Ses: 🔴 AĞLIYOR!';
+                document.getElementById('baby-sound').style.background = 'rgba(255,0,0,0.5)';
+                if (conn && conn.open) conn.send({ type: 'baby_alert', alert: 'sound_start' });
+            }
+        } else {
+            // Ağlama oranı %20'nin altına düşerse alarmı kapat (hysteresis)
+            if (babyAudioAlert && cryRatio < 0.2) {
                 babyAudioAlert = false;
                 document.getElementById('baby-sound').innerText = 'Ses: 🟢';
                 document.getElementById('baby-sound').style.background = 'rgba(0,0,0,0.5)';
             }
         }
         
-        if (highVolumeFrames > 30 && !babyAudioAlert) { 
-            babyAudioAlert = true;
-            document.getElementById('baby-sound').innerText = 'Ses: 🔴 AĞLIYOR!';
-            document.getElementById('baby-sound').style.background = 'rgba(255,0,0,0.5)';
-            if (conn && conn.open) conn.send({ type: 'baby_alert', alert: 'sound_start' });
-        }
-        requestAnimationFrame(monitor);
+        setTimeout(monitor, 100);
     }
-    monitor();
+    
+    setTimeout(monitor, 1000);
 }
+
 
 function startMotionMonitoring() {
     const motionCanvas = document.createElement('canvas');
@@ -834,13 +889,85 @@ function startMotionMonitoring() {
         const currentFrame = motionCtx.getImageData(0, 0, 64, 48).data;
         
         if (prevFrame) {
-            let diff = 0;
-            for (let i = 0; i < currentFrame.length; i += 4) {
-                diff += Math.abs(currentFrame[i] - prevFrame[i]);
-                diff += Math.abs(currentFrame[i+1] - prevFrame[i+1]);
-                diff += Math.abs(currentFrame[i+2] - prevFrame[i+2]);
+            let changedPixels = 0;
+            let personChangedPixels = 0;
+            let personPixelsCount = 0;
+            
+            // Person bounding boxes mapped to 64x48 grid
+            const personGrids = [];
+            if (modelReady && people && people.length > 0) {
+                for (const p of people) {
+                    if (p.bbox) {
+                        const x1 = Math.max(0, Math.floor(p.bbox[0] * 64 / vid.videoWidth));
+                        const y1 = Math.max(0, Math.floor(p.bbox[1] * 48 / vid.videoHeight));
+                        const x2 = Math.min(63, Math.ceil((p.bbox[0] + p.bbox[2]) * 64 / vid.videoWidth));
+                        const y2 = Math.min(47, Math.ceil((p.bbox[1] + p.bbox[3]) * 48 / vid.videoHeight));
+                        personGrids.push({ x1, y1, x2, y2 });
+                    }
+                }
             }
-            if (diff / (64 * 48 * 3) > 12 && !babyMotionAlert) { 
+            
+            for (let y = 0; y < 48; y++) {
+                for (let x = 0; x < 64; x++) {
+                    const idx = (y * 64 + x) * 4;
+                    const diffR = Math.abs(currentFrame[idx] - prevFrame[idx]);
+                    const diffG = Math.abs(currentFrame[idx + 1] - prevFrame[idx + 1]);
+                    const diffB = Math.abs(currentFrame[idx + 2] - prevFrame[idx + 2]);
+                    const pixelDiff = diffR + diffG + diffB;
+                    
+                    // Eşik değeri (kanal başına ortalama 20 birim değişim)
+                    const isChanged = pixelDiff > 60;
+                    
+                    if (isChanged) {
+                        changedPixels++;
+                    }
+                    
+                    // Hücrenin bir insanın içinde olup olmadığını kontrol et
+                    let inPersonBox = false;
+                    for (const grid of personGrids) {
+                        if (x >= grid.x1 && x <= grid.x2 && y >= grid.y1 && y <= grid.y2) {
+                            inPersonBox = true;
+                            break;
+                        }
+                    }
+                    
+                    if (inPersonBox) {
+                        personPixelsCount++;
+                        if (isChanged) {
+                            personChangedPixels++;
+                        }
+                    }
+                }
+            }
+            
+            const totalPixels = 64 * 48;
+            const changedRatio = changedPixels / totalPixels;
+            
+            let triggerMotion = false;
+            
+            if (modelReady) {
+                if (personGrids.length > 0 && personPixelsCount > 0) {
+                    // Yapay zeka insan tespit ettiyse:
+                    // İnsan alanı içerisindeki piksel değişim oranı eşiği aşmalı (%6 yeterlidir)
+                    const personChangeRatio = personChangedPixels / personPixelsCount;
+                    if (personChangeRatio > 0.06) {
+                        triggerMotion = true;
+                    }
+                } else {
+                    // Yapay zeka insan tespit etmediyse (örneğin bebek tamamen battaniye altındaysa):
+                    // Sadece bölgesel (lokalize) harekete bak (ışık değişimlerini ve kumlanmayı eler)
+                    if (changedRatio > 0.02 && changedRatio < 0.20) {
+                        triggerMotion = true;
+                    }
+                }
+            } else {
+                // Yapay zeka henüz hazır değilse klasik lokalize hareket filtresi kullan:
+                if (changedRatio > 0.02 && changedRatio < 0.25) {
+                    triggerMotion = true;
+                }
+            }
+            
+            if (triggerMotion && !babyMotionAlert) { 
                 babyMotionAlert = true;
                 document.getElementById('baby-motion').innerText = 'Hareket: 🔴 HAREKET!';
                 document.getElementById('baby-motion').style.background = 'rgba(255,0,0,0.5)';
@@ -856,3 +983,4 @@ function startMotionMonitoring() {
         prevFrame = currentFrame;
     }, 500); 
 }
+
