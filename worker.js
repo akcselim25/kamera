@@ -2,7 +2,7 @@ let detector = null;
 
 const DB_NAME = 'MediaPipeCache';
 const STORE_NAME = 'models';
-const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/int8/1/efficientdet_lite2.tflite';
+const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite4/int8/1/efficientdet_lite4.tflite';
 
 async function getCachedModel() {
     return new Promise((resolve) => {
@@ -38,7 +38,7 @@ async function init() {
         let buffer = await getCachedModel();
         
         if (!buffer) {
-            postMessage({ type: 'progress', message: 'Gelişmiş Yapay Zeka Modeli İndiriliyor (15MB)...' });
+            postMessage({ type: 'progress', message: 'Gelişmiş Yapay Zeka Modeli İndiriliyor (30MB)...' });
             const resp = await fetch(MODEL_URL);
             const arrayBuf = await resp.arrayBuffer();
             buffer = new Uint8Array(arrayBuf);
