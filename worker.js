@@ -38,14 +38,14 @@ async function init() {
         let buffer = await getCachedModel();
         
         if (!buffer) {
-            postMessage({ type: 'progress', message: 'Gelişmiş Yapay Zeka Modeli İndiriliyor (30MB)...' });
+            postMessage({ type: 'progress', message: 'Yapay Zeka Modeli (EfficientDet-Lite4) İndiriliyor (30MB)...' });
             const resp = await fetch(MODEL_URL);
             const arrayBuf = await resp.arrayBuffer();
             buffer = new Uint8Array(arrayBuf);
             await cacheModel(buffer);
-            postMessage({ type: 'progress', message: 'Model Kaydedildi!' });
+            postMessage({ type: 'progress', message: 'EfficientDet-Lite4 Model Kaydedildi!' });
         } else {
-            postMessage({ type: 'progress', message: 'Model Hafızadan Yüklendi 🚀' });
+            postMessage({ type: 'progress', message: 'EfficientDet-Lite4 Modeli Hafızadan Yüklendi 🚀' });
         }
 
         const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js');

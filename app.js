@@ -45,10 +45,10 @@ async function loadAI() {
     const lt = document.getElementById('lt');
     if (ld) ld.style.display = 'block';
 
-    if (lt) lt.innerText = 'AI İş Parçacığı Başlatılıyor...';
+    if (lt) lt.innerText = 'EfficientDet-Lite4 Modeli Başlatılıyor...';
     if (lf) lf.style.width = '30%';
 
-    aiWorker = new Worker('worker.js?v=33');
+    aiWorker = new Worker('worker.js?v=34');
     
     aiWorker.onmessage = (e) => {
         if (e.data.type === 'ready') {
@@ -70,6 +70,8 @@ async function loadAI() {
             } else {
                 setTimeout(() => { requestAnimationFrame(detectFrame); }, 50); // Throttle normal mode to ~20 FPS to prevent CPU overheating
             }
+        } else if (e.data.type === 'progress') {
+            if (lt) lt.innerText = e.data.message;
         } else if (e.data.type === 'error') {
             console.error('AI yükleme hatası:', e.data.error);
             if (lt) lt.innerText = 'AI yüklenemedi: ' + e.data.error;
@@ -78,7 +80,7 @@ async function loadAI() {
         }
     };
     
-    if (lt) lt.innerText = 'Model İndiriliyor (Arka Plan)...';
+    if (lt) lt.innerText = 'EfficientDet-Lite4 Modeli İndiriliyor...';
     if (lf) lf.style.width = '60%';
     aiWorker.postMessage({ type: 'init' });
 }
