@@ -48,7 +48,7 @@ async function loadAI() {
     if (lt) lt.innerText = 'EfficientDet-Lite2 Modeli Başlatılıyor...';
     if (lf) lf.style.width = '30%';
 
-    aiWorker = new Worker('worker.js?v=35');
+    aiWorker = new Worker('worker.js?v=36');
     
     aiWorker.onmessage = (e) => {
         if (e.data.type === 'ready') {
