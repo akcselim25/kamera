@@ -2,7 +2,7 @@ let detector = null;
 
 const DB_NAME = 'MediaPipeCache';
 const STORE_NAME = 'models';
-const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite4/int8/1/efficientdet_lite4.tflite';
+const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/int8/1/efficientdet_lite2.tflite';
 
 async function getCachedModel() {
     return new Promise((resolve) => {
@@ -32,20 +32,33 @@ async function cacheModel(buffer) {
     });
 }
 
+async function deleteCachedModel() {
+    return new Promise((resolve) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onsuccess = () => {
+            const db = req.result;
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            tx.objectStore(STORE_NAME).delete(MODEL_URL);
+            tx.oncomplete = () => resolve();
+        };
+        req.onerror = () => resolve();
+    });
+}
+
 async function init() {
     try {
         postMessage({ type: 'progress', message: 'Hafıza Kontrol Ediliyor...' });
         let buffer = await getCachedModel();
         
         if (!buffer) {
-            postMessage({ type: 'progress', message: 'Yapay Zeka Modeli (EfficientDet-Lite4) İndiriliyor (30MB)...' });
+            postMessage({ type: 'progress', message: 'Yapay Zeka Modeli (EfficientDet-Lite2) İndiriliyor (15MB)...' });
             const resp = await fetch(MODEL_URL);
             const arrayBuf = await resp.arrayBuffer();
             buffer = new Uint8Array(arrayBuf);
             await cacheModel(buffer);
-            postMessage({ type: 'progress', message: 'EfficientDet-Lite4 Model Kaydedildi!' });
+            postMessage({ type: 'progress', message: 'EfficientDet-Lite2 Model Kaydedildi!' });
         } else {
-            postMessage({ type: 'progress', message: 'EfficientDet-Lite4 Modeli Hafızadan Yüklendi 🚀' });
+            postMessage({ type: 'progress', message: 'EfficientDet-Lite2 Modeli Hafızadan Yüklendi 🚀' });
         }
 
         const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js');
@@ -53,17 +66,24 @@ async function init() {
 
         postMessage({ type: 'progress', message: 'Yapay Zeka Çekirdeği Başlatılıyor...' });
         const resolver = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm');
-        detector = await ObjectDetector.createFromOptions(resolver, {
-            baseOptions: {
-                modelAssetBuffer: buffer,
-                delegate: 'CPU'
-            },
-            categoryAllowlist: ['person'],
-            scoreThreshold: 0.30,
-            maxResults: 15,
-            runningMode: 'IMAGE'
-        });
-        postMessage({ type: 'ready' });
+        
+        try {
+            detector = await ObjectDetector.createFromOptions(resolver, {
+                baseOptions: {
+                    modelAssetBuffer: buffer,
+                    delegate: 'CPU'
+                },
+                categoryAllowlist: ['person'],
+                scoreThreshold: 0.30,
+                maxResults: 15,
+                runningMode: 'IMAGE'
+            });
+            postMessage({ type: 'ready' });
+        } catch (detectorError) {
+            // Model oluşturma başarısız olursa (örn. bozuk dosya önbelleğe alındıysa), önbelleği silip hata fırlat
+            await deleteCachedModel();
+            throw new Error("Model dosyası bozuk veya eksik yüklendi. Önbellek temizlendi, lütfen sayfayı yenileyin. Hata: " + detectorError.message);
+        }
     } catch (e) {
         postMessage({ type: 'error', error: e.toString() + " | " + e.stack });
     }
@@ -75,7 +95,6 @@ self.onmessage = async (e) => {
     } else if (e.data.type === 'detect') {
         if (!detector) return;
         const bitmap = e.data.bitmap;
-        // In worker, we just process the bitmap as a static image for that moment
         const results = detector.detect(bitmap);
         postMessage({ type: 'result', detections: results.detections });
         bitmap.close(); // free memory immediately

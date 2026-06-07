@@ -45,10 +45,10 @@ async function loadAI() {
     const lt = document.getElementById('lt');
     if (ld) ld.style.display = 'block';
 
-    if (lt) lt.innerText = 'EfficientDet-Lite4 Modeli Başlatılıyor...';
+    if (lt) lt.innerText = 'EfficientDet-Lite2 Modeli Başlatılıyor...';
     if (lf) lf.style.width = '30%';
 
-    aiWorker = new Worker('worker.js?v=34');
+    aiWorker = new Worker('worker.js?v=35');
     
     aiWorker.onmessage = (e) => {
         if (e.data.type === 'ready') {
@@ -80,7 +80,7 @@ async function loadAI() {
         }
     };
     
-    if (lt) lt.innerText = 'EfficientDet-Lite4 Modeli İndiriliyor...';
+    if (lt) lt.innerText = 'EfficientDet-Lite2 Modeli İndiriliyor...';
     if (lf) lf.style.width = '60%';
     aiWorker.postMessage({ type: 'init' });
 }
